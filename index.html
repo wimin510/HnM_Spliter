@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無賴帳本</title>
+    <title>家庭收支分攤計算器</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -26,7 +26,7 @@
 
     <div id="app" class="container mx-auto p-4 md:p-8">
         <h1 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-6 text-center">
-            無賴帳本 (HnM Splitter)
+            家庭收支分攤計算器 (HnM Splitter)
         </h1>
         
         <!-- 顯示用戶 ID 和連線狀態 -->
@@ -115,28 +115,18 @@
         </div>
     </div>
 
-    <!-- Firebase SDK Imports (Module style) -->
+    <!-- Main Application Logic (All in one module script) -->
     <script type="module">
-        // 匯入必要的 Firebase SDK 模組
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // 🚨 修正：將所有邏輯移動到單一的 type="module" 區塊，直接使用匯入的函式。
+        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, addDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         
-        // 確保可以從 window.onload 之後的主腳本中存取這些模組
-        window.FirebaseServices = {
-            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-            getFirestore, doc, addDoc, onSnapshot, collection, deleteDoc, setLogLevel
-        };
-    </script>
-
-    <!-- Main Application Logic (Babel script to use global modules) -->
-    <script>
-        // 設定全域變數，以便在驗證完成後使用
+        // 全域變數
         let db;
         let auth;
-        let userId = 'loading'; // 用於儲存當前用戶 ID
-        let authReady = false; // 驗證狀態旗標
+        let userId = 'loading';
+        let authReady = false;
 
         // 全域 helper 函式：顯示自訂訊息視窗 (取代 alert/confirm)
         function showMessage(title, content) {
@@ -222,10 +212,10 @@
                 return;
             }
             try {
-                // 使用公共路徑，讓夥伴之間可以共用同一筆資料
-                const docRef = FirebaseServices.doc(db, 
+                // 使用公共路徑
+                const docRef = doc(db, 
                     `artifacts/${__app_id}/public/data/expenses`, docId);
-                await FirebaseServices.deleteDoc(docRef);
+                await deleteDoc(docRef);
                 // onSnapshot 會自動更新列表
             } catch (error) {
                 console.error("刪除費用失敗: ", error);
@@ -302,21 +292,21 @@
 
             document.getElementById('loading-message').classList.add('hidden');
             document.getElementById('auth-status').textContent = '連線成功 (即時)';
-            document.getElementById('auth-status').classList.remove('text-yellow-600');
+            document.getElementById('auth-status').classList.remove('text-yellow-600', 'text-red-600');
             document.getElementById('auth-status').classList.add('text-green-600');
             
             const collectionPath = `artifacts/${__app_id}/public/data/expenses`;
             
             // 使用 onSnapshot 訂閱資料，確保即時更新
-            const unsubscribe = FirebaseServices.onSnapshot(
-                FirebaseServices.collection(db, collectionPath),
+            const unsubscribe = onSnapshot(
+                collection(db, collectionPath),
                 (snapshot) => {
                     const expenses = [];
                     snapshot.forEach(doc => {
                         expenses.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    // 根據日期排序 (如果您的文件中有 timeStamp 欄位，可以改用它)
+                    // 根據日期排序 (最新的在前面)
                     expenses.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); 
                     
                     renderExpenseList(expenses);
@@ -331,8 +321,8 @@
                 }
             );
 
-            // 如果應用程式有清理機制，可以返回 unsubscribe 函式來停止監聽。
-            // 這裡我們暫時讓它持續運行。
+            // 讓 loadData 傳回一個函式，以便在需要時停止監聽 (非必要)
+            return unsubscribe;
         }
 
         // 函式：新增費用
@@ -361,14 +351,14 @@
                 paidBy,
                 splitType,
                 createdAt: Date.now(), // 用於排序
-                // 記錄是哪個用戶新增的 (可選，用於追蹤)
+                // 記錄是哪個用戶新增的
                 createdBy: userId, 
             };
 
             try {
-                // 使用公共路徑，讓夥伴之間可以共用同一筆資料
+                // 使用公共路徑
                 const collectionPath = `artifacts/${__app_id}/public/data/expenses`;
-                await FirebaseServices.addDoc(FirebaseServices.collection(db, collectionPath), newExpense);
+                await addDoc(collection(db, collectionPath), newExpense);
 
                 // 清空表單
                 form.reset();
@@ -380,12 +370,9 @@
         }
 
         // 啟動應用程式的主函式
-        async function initApp() {
+        function initApp() {
             try {
                 // 1. 初始化 Firebase 服務
-                const { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, getFirestore, onAuthStateChanged, setLogLevel } = window.FirebaseServices;
-
-                // 🚨 建議開啟 Debug 級別的日誌，以便在控制台看到詳細的 Firebase 資訊
                 setLogLevel('debug'); 
 
                 const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
@@ -400,7 +387,7 @@
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
                 // 使用 onAuthStateChanged 監聽並等待驗證完成
-                FirebaseServices.onAuthStateChanged(auth, (user) => {
+                onAuthStateChanged(auth, (user) => {
                     if (user) {
                         // 成功登入
                         userId = user.uid;
@@ -418,11 +405,11 @@
                         // 嘗試使用提供的 Token 登入或匿名登入
                         if (initialAuthToken) {
                             // 使用平台提供的自訂 Token 登入
-                            FirebaseServices.signInWithCustomToken(auth, initialAuthToken)
+                            signInWithCustomToken(auth, initialAuthToken)
                                 .catch(error => {
                                     console.error("Custom Token 登入失敗, 轉為匿名登入:", error);
                                     // 如果 Custom Token 失敗，使用匿名登入作為備用
-                                    FirebaseServices.signInAnonymously(auth).catch(anonError => {
+                                    signInAnonymously(auth).catch(anonError => {
                                         console.error("匿名登入也失敗:", anonError);
                                         authStatusEl.textContent = '連線失敗 (登入)';
                                         authStatusEl.classList.add('text-red-600');
@@ -430,7 +417,7 @@
                                 });
                         } else {
                             // 沒有 Token，直接匿名登入
-                             FirebaseServices.signInAnonymously(auth).catch(error => {
+                             signInAnonymously(auth).catch(error => {
                                 console.error("匿名登入失敗:", error);
                                 authStatusEl.textContent = '連線失敗 (匿名登入)';
                                 authStatusEl.classList.add('text-red-600');
@@ -451,7 +438,7 @@
             }
         }
 
-        // 等待所有 HTML 內容載入完成後啟動應用程式
+        // 啟動應用程式的主函式
         window.onload = initApp;
 
     </script>
