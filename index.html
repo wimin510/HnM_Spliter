@@ -1,651 +1,657 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  signInWithCustomToken, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  doc,
-  deleteDoc,
-  setLogLevel,
-  serverTimestamp,
-  limit,
-  orderBy
-} from 'firebase/firestore';
-
-// --- 全域變數初始化 ---
-// 確保全域變數存在，以便在 Canvas 環境中運行
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-let firebaseConfig = null;
-try {
-  // **修正：重新從 Canvas 環境的全局變數中讀取配置，以確保 API Key 有效。**
-  firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-} catch (e) {
-  console.error("解析 Firebase 配置時發生錯誤:", e);
-}
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-
-// --- 應用程式常數 ---
-const CURRENCIES = [
-  { code: 'TWD', symbol: 'NT$', name: '新台幣' },
-  { code: 'JPY', symbol: '¥', name: '日圓' },
-  { code: 'USD', symbol: '$', name: '美元' },
-];
-
-// 兩位分帳用戶 (H 和 M)
-const USER_H = 'H';
-const USER_M = 'M';
-
-// 用於 UI 顯示的用戶名稱
-const USER_NAMES = {
-  [USER_H]: 'H (你)',
-  [USER_M]: 'M (伴侶)',
-};
-
-const App = () => {
-  // --- 狀態管理 ---
-  const [db, setDb] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [expenses, setExpenses] = useState([]); // 所有費用記錄
-  const [showConfirm, setShowConfirm] = useState(null); // 用於自訂確認對話框
-
-  // 新增費用表單狀態
-  const [newExpense, setNewExpense] = useState({
-    description: '',
-    totalAmount: 0,
-    currency: CURRENCIES[0].code,
-    paidBy: USER_H,
-    // 兩人的分攤金額
-    splitH: 0, 
-    splitM: 0,
-    // 日期 (格式: YYYY-MM-DD)
-    date: new Date().toISOString().substring(0, 10), 
-  });
-
-  // --- Firebase 初始化與認證 ---
-  useEffect(() => {
-    // 這裡我們直接使用 firebaseConfig，而不是依賴 __firebase_config
-    if (!firebaseConfig) {
-      setError("Firebase 配置遺失。請提供有效的 Firebase 配置。");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLogLevel('debug'); 
-      // 使用從全局變數讀取的配置進行初始化
-      const app = initializeApp(firebaseConfig);
-      const firestore = getFirestore(app);
-      const authInstance = getAuth(app);
-      
-      setDb(firestore);
-
-      const unsubscribeAuth = onAuthStateChanged(authInstance, (user) => {
-        if (user) {
-          setUserId(user.uid);
-        } else {
-          setUserId(null);
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無賴帳本 (HnM Spliter)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 設置字體為 Inter -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
         }
-        setIsAuthReady(true);
-        setLoading(false);
-      });
-
-      const handleSignIn = async () => {
-        try {
-          if (initialAuthToken) {
-            await signInWithCustomToken(authInstance, initialAuthToken);
-          } else {
-            await signInAnonymously(authInstance);
-          }
-        } catch (e) {
-          console.error("Firebase 登入失敗:", e);
-          setError(`登入失敗: ${e.message}`);
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
         }
-      };
-
-      handleSignIn();
-      return () => unsubscribeAuth();
-    } catch (e) {
-      console.error("Firebase 初始化失敗:", e);
-      setError(`初始化失敗: ${e.message}`);
-      setLoading(false);
-    }
-  }, []);
-
-  // --- 資料庫連線與即時監聽 ---
-  useEffect(() => {
-    if (!db || !isAuthReady || !userId) {
-      return;
-    }
-
-    // Firestore 路徑： /artifacts/{appId}/public/data/expenses
-    const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
-    // 為了計算總餘額，我們需要監聽所有記錄
-    // 注意：這裡移除了 orderBy(date) 和 limit()，因為在客戶端排序更簡單且不易觸發 Firestore 索引錯誤
-    const q = query(collection(db, expensesCollectionPath));
-
-    const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
-      const fetchedExpenses = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          // 處理日期格式：如果 Firestore 伺服器時間戳記存在，則使用它來決定排序順序
-          // 這裡將 date 轉換為 YYYY-MM-DD 字串，以確保顯示正確
-          date: data.date && data.date.toDate ? data.date.toDate().toISOString().substring(0, 10) : data.date || 'N/A',
-          timestamp: data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().getTime() : 0, // 用於排序
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
         }
-      });
-      setExpenses(fetchedExpenses);
-      setError(null);
-    }, (e) => {
-      console.error("Firestore 監聽失敗:", e);
-      setError(`資料讀取失敗: ${e.message}. 請檢查您的 Firestore 安全規則。`);
-    });
-
-    return () => unsubscribeSnapshot();
-  }, [db, isAuthReady, userId]);
-
-  // --- 刪除費用 - 觸發自訂確認對話框 ---
-  const confirmDeleteExpense = (expenseId) => {
-    setShowConfirm({
-      message: '確定要刪除這筆費用嗎？',
-      onConfirm: () => deleteExpense(expenseId),
-    });
-  };
-
-  // 實際刪除 Firestore 中的文件
-  const deleteExpense = useCallback(async (expenseId) => {
-    if (!db) return;
-
-    try {
-      const expenseDocPath = `artifacts/${appId}/public/data/expenses/${expenseId}`;
-      await deleteDoc(doc(db, expenseDocPath));
-      setShowConfirm(null); // 關閉確認對話框
-    } catch (e) {
-      console.error("刪除費用失敗:", e);
-      setError(`刪除費用失敗: ${e.message}`);
-    }
-  }, [db, appId]);
-
-  // --- 自訂分帳邏輯 (Requirement 3) ---
-
-  // 處理總金額變更
-  const handleTotalAmountChange = (value) => {
-    const total = parseFloat(value) || 0;
-    
-    // 總金額變更時，保持分攤比例，如果之前是均分，則保持均分
-    let splitH = (newExpense.splitH / newExpense.totalAmount) * total;
-    let splitM = total - splitH;
-    
-    // 如果總金額之前是 0，則新金額直接均分
-    if (newExpense.totalAmount === 0 || total === 0 || isNaN(splitH)) {
-        splitH = total / 2;
-        splitM = total / 2;
-    }
-
-    setNewExpense(prev => ({
-      ...prev,
-      totalAmount: total,
-      splitH: parseFloat(splitH.toFixed(2)),
-      splitM: parseFloat(splitM.toFixed(2)),
-    }));
-  };
-
-  // 處理 H 的分帳金額變更
-  const handleSplitHChange = (value) => {
-    const splitH = parseFloat(value) || 0;
-    const total = newExpense.totalAmount;
-    const splitM = total - splitH; // 自動計算 M 的分攤金額
-    
-    setNewExpense(prev => ({
-      ...prev,
-      splitH: parseFloat(splitH.toFixed(2)),
-      // 確保 M 的分攤金額不會小於 0 且不超過總金額
-      splitM: parseFloat(Math.min(total, Math.max(0, splitM)).toFixed(2)), 
-    }));
-  };
-
-  // 處理 M 的分帳金額變更
-  const handleSplitMChange = (value) => {
-    const splitM = parseFloat(value) || 0;
-    const total = newExpense.totalAmount;
-    const splitH = total - splitM; // 自動計算 H 的分攤金額
-    
-    setNewExpense(prev => ({
-      ...prev,
-      splitM: parseFloat(splitM.toFixed(2)),
-      // 確保 H 的分攤金額不會小於 0 且不超過總金額
-      splitH: parseFloat(Math.min(total, Math.max(0, splitH)).toFixed(2)),
-    }));
-  };
-  
-  // 處理其他輸入變化 (描述, 幣別, 付款人, 日期)
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    if (name === 'totalAmount') {
-      handleTotalAmountChange(value);
-    } else if (name === 'splitH') {
-      handleSplitHChange(value);
-    } else if (name === 'splitM') {
-      handleSplitMChange(value);
-    } else {
-      setNewExpense(prev => ({ ...prev, [name]: value }));
-    }
-  };
-
-  // --- 新增費用到 Firestore ---
-  const addExpense = useCallback(async () => {
-    if (!db || !userId) {
-      alertMessage("資料庫未準備好或用戶未登入。");
-      return;
-    }
-
-    const { description, totalAmount, currency, paidBy, splitH, splitM, date } = newExpense;
-    
-    if (description.trim() === '' || totalAmount <= 0) {
-      alertMessage("請輸入有效的費用說明和總金額。");
-      return;
-    }
-
-    // 檢查分攤總額是否與總金額匹配 (允許微小浮點數誤差)
-    const splitSum = splitH + splitM;
-    if (Math.abs(splitSum - totalAmount) > 0.01) {
-      alertMessage(`分攤總額 (${splitSum.toFixed(2)}) 與總金額 (${totalAmount.toFixed(2)}) 不符，請檢查。`);
-      return;
-    }
-
-    try {
-      // 確保儲存的數值是浮點數，而不是字串
-      const dataToSave = {
-        description: description.trim(),
-        totalAmount: parseFloat(totalAmount.toFixed(2)),
-        currency: currency,
-        paidBy: paidBy,
-        date: date, // 儲存日期字串 (YYYY-MM-DD)
-        split: { 
-          [USER_H]: parseFloat(splitH.toFixed(2)), 
-          [USER_M]: parseFloat(splitM.toFixed(2)) 
-        },
-        timestamp: serverTimestamp(), // 使用 Firestore 伺服器時間戳記進行排序
-        createdByUserId: userId,
-      };
-
-      const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
-      await addDoc(collection(db, expensesCollectionPath), dataToSave);
-
-      // 清除表單
-      setNewExpense({
-        description: '',
-        totalAmount: 0,
-        currency: CURRENCIES[0].code,
-        paidBy: USER_H,
-        splitH: 0,
-        splitM: 0,
-        date: new Date().toISOString().substring(0, 10),
-      });
-
-    } catch (e) {
-      console.error("新增費用失敗:", e);
-      setError(`新增費用失敗: ${e.message}`);
-    }
-  }, [db, userId, newExpense, appId]);
-  
-  // 模擬 alert 提示 (由於不能使用原生 alert)
-  const alertMessage = (message) => {
-    console.warn("應用程式提示:", message);
-    setError(message);
-    setTimeout(() => setError(null), 4000); 
-  };
-
-  // --- 核心結算邏輯 (Requirement 4) ---
-  const balanceByCurrency = useMemo(() => {
-    const balance = {}; 
-
-    CURRENCIES.forEach(c => {
-      balance[c.code] = { 
-        [USER_H]: 0, // H 實際支付
-        [USER_M]: 0, // M 實際支付
-        H_Owed: 0,   // H 應負擔
-        M_Owed: 0,   // M 應負擔
-        net: 0      // H 的淨餘額 (正: M 欠 H; 負: H 欠 M)
-      };
-    });
-
-    expenses.forEach(expense => {
-      const { currency, totalAmount, paidBy, split } = expense;
-      
-      if (!balance[currency]) return; 
-
-      // 1. 紀錄實際支付
-      if (paidBy === USER_H) {
-        balance[currency][USER_H] += totalAmount;
-      } else if (paidBy === USER_M) {
-        balance[currency][USER_M] += totalAmount;
-      }
-
-      // 2. 紀錄應負擔份額
-      balance[currency].H_Owed += (split?.[USER_H] || 0);
-      balance[currency].M_Owed += (split?.[USER_M] || 0);
-    });
-
-    Object.keys(balance).forEach(code => {
-      const b = balance[code];
-      
-      // M 欠 H = M 應負擔 - M 支付 (如果為正，M 欠 H)
-      const M_owes_H = b.M_Owed - b[USER_M];
-      // H 欠 M = H 應負擔 - H 支付 (如果為正，H 欠 M)
-      const H_owes_M = b.H_Owed - b[USER_H];
-      
-      // 淨結算 (H 的角度) = M 欠 H - H 欠 M
-      balance[code].net = M_owes_H - H_owes_M;
-    });
-
-    return balance;
-  }, [expenses]);
-  
-  // 找到主要幣別的淨餘額 (TWD)
-  const mainBalance = balanceByCurrency[CURRENCIES[0].code]?.net || 0;
-  
-  // 最近五筆紀錄 (Requirement 5) - 在客戶端排序和限制數量
-  const recentExpenses = useMemo(() => {
-    return expenses
-      // 依據時間戳記 (或 date) 排序
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 5);
-  }, [expenses]);
-  
-  // --- UI 輔助函數 ---
-  const formatCurrency = (amount, currencyCode) => {
-    const { symbol } = CURRENCIES.find(c => c.code === currencyCode) || { symbol: '' };
-    const num = parseFloat(amount);
-    return isNaN(num) ? 'N/A' : `${symbol} ${num.toFixed(2)}`;
-  };
-  
-  // --- 渲染 ---
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
-        <div className="text-xl font-semibold text-indigo-400">載入中... 正在連接 Firebase...</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-900 text-white font-sans p-4 sm:p-8">
-      
-      {/* 頂部錯誤提示 */}
-      {error && (
-        <div className="fixed top-0 left-0 right-0 p-3 bg-red-700 text-white text-center z-50 shadow-lg">
-          {error}
-        </div>
-      )}
-
-      {/* 標題與狀態 */}
-      <header className="max-w-4xl mx-auto mb-8 text-center pt-2">
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-400 tracking-tight">無賴帳本 (HnM Splitter)</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          連線狀態: <span className={isAuthReady && userId ? "text-green-400" : "text-red-400"}>{isAuthReady && userId ? "已連線" : "連線中/錯誤"}</span>
-        </p>
-        <p className="text-xs text-gray-600">
-          您的 Canvas ID: <span className="font-mono">{userId || 'N/A'}</span>
-        </p>
-      </header>
-      
-      {/* 醒目欠款狀態 (Requirement 4) */}
-      <section className="max-w-2xl mx-auto mb-10 p-6 rounded-xl shadow-2xl transition duration-300 
-        transform hover:scale-[1.02]
-        border-4 
-        border-dashed
-        bg-gray-800/70
-        backdrop-blur-sm
-        ">
-        <h2 className="text-2xl font-bold mb-4 text-center text-indigo-300">總結算狀態 ({CURRENCIES[0].code})</h2>
-        <div className="text-center">
-          {mainBalance > 0.01 ? (
-            <div className="text-green-400">
-              <p className="text-4xl font-extrabold">{USER_NAMES[USER_M]} 欠 {USER_NAMES[USER_H]}</p>
-              <p className="text-6xl font-black mt-2">{formatCurrency(mainBalance, CURRENCIES[0].code)}</p>
-            </div>
-          ) : mainBalance < -0.01 ? (
-            <div className="text-red-400">
-              <p className="text-4xl font-extrabold">{USER_NAMES[USER_H]} 欠 {USER_NAMES[USER_M]}</p>
-              <p className="text-6xl font-black mt-2">{formatCurrency(Math.abs(mainBalance), CURRENCIES[0].code)}</p>
-            </div>
-          ) : (
-            <div className="text-yellow-400">
-              <p className="text-4xl font-extrabold">帳目結清！</p>
-              <p className="text-6xl font-black mt-2">{formatCurrency(0, CURRENCIES[0].code)}</p>
-            </div>
-          )}
-        </div>
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4f46e5',
+                        'secondary': '#10b981',
+                        'danger': '#ef4444',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="p-4 sm:p-6 md:p-8">
+    <div id="app" class="max-w-xl mx-auto space-y-6">
+        <h1 class="text-3xl font-bold text-center text-gray-800">無賴帳本 📝</h1>
+        <p class="text-center text-sm text-gray-500 font-mono" id="user-info"></p>
         
-        {/* 其他幣別的簡要顯示 */}
-        {CURRENCIES.slice(1).map(({ code, symbol }) => {
-          const balance = balanceByCurrency[code]?.net || 0;
-          if (Math.abs(balance) < 0.01) return null; // 忽略已結清的幣別
-          return (
-            <p key={code} className={`text-sm mt-2 font-mono text-center ${balance > 0 ? 'text-green-300' : 'text-red-300'}`}>
-              ({code}: {balance > 0 ? `${USER_NAMES[USER_M]} 欠 ${USER_NAMES[USER_H]} ${formatCurrency(balance, code)}` : `${USER_NAMES[USER_H]} 欠 ${USER_NAMES[USER_M]} ${formatCurrency(Math.abs(balance), code)}`})
-            </p>
-          );
-        })}
+        <!-- 欠款狀態顯示 -->
+        <div id="balance-card" class="p-6 rounded-xl shadow-lg transition-all duration-300">
+            <h2 class="text-lg font-semibold mb-2 text-white" id="balance-status-text">載入中...</h2>
+            <p class="text-4xl font-extrabold text-white" id="balance-amount">--</p>
+        </div>
 
-      </section>
-
-      {/* 新增費用區塊 */}
-      <section className="max-w-4xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl mb-10">
-        <h2 className="text-2xl font-bold mb-6 text-indigo-300">新增紀錄</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          
-          {/* 費用說明與日期 */}
-          <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-400 mb-1">費用說明</label>
-              <input
-                type="text"
-                id="description"
-                name="description"
-                value={newExpense.description}
-                onChange={handleInputChange}
-                placeholder="例如: 週末採買"
-                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-              />
-            </div>
-            {/* 紀錄日期 (Requirement 6) */}
-            <div>
-              <label htmlFor="date" className="block text-sm font-medium text-gray-400 mb-1">紀錄日期</label>
-              <input
-                type="date"
-                id="date"
-                name="date"
-                value={newExpense.date}
-                onChange={handleInputChange}
-                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-              />
-            </div>
-          </div>
-
-          {/* 總金額與幣別 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="totalAmount" className="block text-sm font-medium text-gray-400 mb-1">總金額</label>
-              <input
-                type="number"
-                id="totalAmount"
-                name="totalAmount"
-                value={newExpense.totalAmount === 0 ? '' : newExpense.totalAmount}
-                onChange={handleInputChange}
-                placeholder="0.00"
-                min="0"
-                step="0.01"
-                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-              />
-            </div>
-            {/* 幣別選擇 (Requirement 2) */}
-            <div>
-              <label htmlFor="currency" className="block text-sm font-medium text-gray-400 mb-1">幣別</label>
-              <select
-                id="currency"
-                name="currency"
-                value={newExpense.currency}
-                onChange={handleInputChange}
-                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
-              >
-                {CURRENCIES.map(c => (
-                  <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          
-          {/* 付款人 */}
-          <div>
-            <label htmlFor="paidBy" className="block text-sm font-medium text-gray-400 mb-1">由誰支付?</label>
-            <select
-              id="paidBy"
-              name="paidBy"
-              value={newExpense.paidBy}
-              onChange={handleInputChange}
-              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
-            >
-              <option value={USER_H}>{USER_NAMES[USER_H]}</option>
-              <option value={USER_M}>{USER_NAMES[USER_M]}</option>
-            </select>
-          </div>
-          
-          {/* 分攤金額 (Requirement 3) */}
-          <div className="col-span-1 md:col-span-2">
-            <h3 className="text-md font-medium text-gray-400 mb-2 mt-2 border-t border-gray-700 pt-3">分攤金額 (兩者總和應接近總金額)</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {/* H 分攤金額 */}
-              <div>
-                <label htmlFor="splitH" className="block text-sm font-medium text-gray-400 mb-1">{USER_NAMES[USER_H]}</label>
-                <input
-                  type="number"
-                  id="splitH"
-                  name="splitH"
-                  value={newExpense.splitH === 0 && newExpense.totalAmount === 0 ? '' : newExpense.splitH}
-                  onChange={handleInputChange}
-                  placeholder="0.00"
-                  min="0"
-                  step="0.01"
-                  className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-                />
-              </div>
-              {/* M 分攤金額 */}
-              <div>
-                <label htmlFor="splitM" className="block text-sm font-medium text-gray-400 mb-1">{USER_NAMES[USER_M]}</label>
-                <input
-                  type="number"
-                  id="splitM"
-                  name="splitM"
-                  value={newExpense.splitM === 0 && newExpense.totalAmount === 0 ? '' : newExpense.splitM}
-                  onChange={handleInputChange}
-                  placeholder="0.00"
-                  min="0"
-                  step="0.01"
-                  className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* 送出按鈕 */}
-          <div className="col-span-1 md:col-span-2 flex justify-end mt-4">
-            <button
-              onClick={addExpense}
-              className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transition duration-200 disabled:opacity-50"
-              disabled={newExpense.description.trim() === '' || newExpense.totalAmount <= 0 || !userId}
-            >
-              儲存紀錄
+        <!-- 名稱設定區塊 -->
+        <div class="bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+            <button id="toggle-settings" class="w-full flex justify-between items-center text-left text-lg font-semibold text-gray-800 focus:outline-none py-1">
+                <span>名稱設定</span>
+                <svg id="settings-chevron" class="w-5 h-5 transition-transform duration-300 transform" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                </svg>
             </button>
-          </div>
-        </div>
-      </section>
-
-      {/* 最近紀錄清單 (Requirement 5) */}
-      <section className="max-w-4xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl">
-        <h3 className="text-xl font-bold mb-4 text-indigo-300">最近五筆紀錄</h3>
-        
-        {recentExpenses.length === 0 ? (
-          <p className="text-gray-400 text-center py-8">目前沒有任何紀錄。</p>
-        ) : (
-          <div className="space-y-3">
-            {recentExpenses.map((expense) => (
-              <div 
-                key={expense.id} 
-                className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-gray-700 rounded-lg shadow-md"
-              >
-                <div className="flex-1 min-w-0 mb-2 sm:mb-0">
-                  <p className="text-lg font-semibold text-white truncate">{expense.description}</p>
-                  <div className="text-sm text-gray-400 space-y-1 sm:space-y-0 sm:space-x-3 mt-1">
-                    <span className="font-mono text-base text-yellow-300">{formatCurrency(expense.totalAmount, expense.currency)}</span>
-                    <span className="text-xs">| 日期: {expense.date}</span>
-                    <span className="text-xs">| 付款人: <span className="text-indigo-300 font-medium">{USER_NAMES[expense.paidBy]}</span></span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                     創建者 ID: {expense.createdByUserId ? `${expense.createdByUserId.substring(0, 8)}...` : 'N/A'}
-                  </div>
-                </div>
-                
-                <div className="text-sm text-gray-300 text-right flex items-center space-x-4">
+            <div id="settings-content" class="mt-4 space-y-4 hidden">
+                <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <p>H 分攤: {formatCurrency(expense.split?.[USER_H] || 0, expense.currency)}</p>
-                        <p>M 分攤: {formatCurrency(expense.split?.[USER_M] || 0, expense.currency)}</p>
+                        <label for="h-name-input" class="block text-sm font-medium text-gray-700">我的名稱 (H)</label>
+                        <input type="text" id="h-name-input" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., John">
                     </div>
-                    <button
-                      onClick={() => confirmDeleteExpense(expense.id)}
-                      className="p-2 text-red-400 hover:text-red-500 rounded-full transition duration-150"
-                      title="刪除費用"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
-                      </svg>
-                    </button>
+                    <div>
+                        <label for="m-name-input" class="block text-sm font-medium text-gray-700">夥伴名稱 (M)</label>
+                        <input type="text" id="m-name-input" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., Mary">
+                    </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      
-      {/* 自訂確認對話框 Modal */}
-      {showConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
-            <p className="text-lg font-semibold text-white mb-6">{"確定要刪除這筆費用嗎？"}</p>
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setShowConfirm(null)}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white font-medium transition duration-150"
-              >
-                取消
-              </button>
-              <button
-                onClick={showConfirm.onConfirm}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition duration-150"
-              >
-                確定刪除
-              </button>
+                <button id="save-names-btn" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition duration-150 ease-in-out">
+                    儲存名稱設定
+                </button>
             </div>
-          </div>
         </div>
-      )}
-    </div>
-  );
-};
+        
+        <!-- 記錄表單 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">新增紀錄</h2>
+            <form id="expense-form" class="space-y-4">
+                
+                <!-- 幣別選擇 -->
+                <div>
+                    <label for="currency" class="block text-sm font-medium text-gray-700">幣別</label>
+                    <select id="currency" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="TWD">新台幣 (TWD)</option>
+                        <option value="JPY">日幣 (JPY)</option>
+                        <option value="USD">美元 (USD)</option>
+                    </select>
+                </div>
 
-export default App;
+                <!-- 總金額 & 日期 -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="totalAmount" class="block text-sm font-medium text-gray-700">總金額</label>
+                        <input type="number" id="totalAmount" step="0.01" min="0" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                    <div>
+                        <label for="recordDate" class="block text-sm font-medium text-gray-700">日期</label>
+                        <input type="date" id="recordDate" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                    </div>
+                </div>
+
+                <!-- 付款人 -->
+                <div>
+                    <label for="payer" class="block text-sm font-medium text-gray-700">付款人</label>
+                    <select id="payer" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="H">我 (Me)</option>
+                        <option value="M">夥伴 (Partner)</option>
+                    </select>
+                </div>
+
+                <!-- 描述 -->
+                <div>
+                    <label for="description" class="block text-sm font-medium text-gray-700">描述 (e.g., 晚餐)</label>
+                    <input type="text" id="description" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., 晚餐">
+                </div>
+
+                <!-- 分帳方式 -->
+                <div>
+                    <label for="splitType" class="block text-sm font-medium text-gray-700">分帳方式</label>
+                    <select id="splitType" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="equal">均分 (Equal)</option>
+                        <option value="custom">自訂金額 (Custom)</option>
+                    </select>
+                </div>
+
+                <!-- 自訂金額分配 (Custom Split) -->
+                <div id="custom-split-fields" class="grid grid-cols-2 gap-4 hidden">
+                    <div>
+                        <label for="amountH" class="block text-sm font-medium text-gray-700">我 (Me) 應付金額</label>
+                        <input type="number" id="amountH" step="0.01" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                    <div>
+                        <label for="amountM" class="block text-sm font-medium text-gray-700">夥伴 (Partner) 應付金額</label>
+                        <input type="number" id="amountM" step="0.01" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                </div>
+
+                <!-- 提交按鈕 -->
+                <button type="submit" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150 ease-in-out">
+                    儲存紀錄
+                </button>
+            </form>
+            <div id="error-message" class="text-danger text-sm mt-3 hidden p-2 bg-red-50 rounded-md"></div>
+        </div>
+
+        <!-- 最近五筆紀錄 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">最近五筆紀錄</h2>
+            <ul id="recent-records" class="space-y-3">
+                <li class="text-gray-500 text-center py-4" id="loading-records">載入中...</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 模組化錯誤提示框 -->
+    <div id="modal-container" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <h3 class="text-lg font-medium leading-6 text-gray-900">錯誤或提示</h3>
+            <div class="mt-2">
+                <p id="modal-message" class="text-sm text-gray-500"></p>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button onclick="document.getElementById('modal-container').classList.add('hidden')" class="px-4 py-2 bg-primary text-white text-base font-medium rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
+                    確認
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            signInWithCustomToken, 
+            onAuthStateChanged 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc,
+            addDoc, 
+            onSnapshot, 
+            collection, 
+            query, 
+            limit,
+            orderBy,
+            serverTimestamp,
+            getDocs
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- 全域變數設定與 Firebase 初始化 ---
+        const USER_PARTY = 'H'; // 假設當前使用者是 H
+        const PARTNER_PARTY = 'M';
+        let PARTY_NAMES = {
+            'H': '我 (Me)', // 預設名稱
+            'M': '夥伴 (Partner)', // 預設名稱
+        };
+
+        let app, db, auth, userId = null;
+        let isAuthReady = false;
+
+        const totalAmountInput = document.getElementById('totalAmount');
+        const amountHInput = document.getElementById('amountH');
+        const amountMInput = document.getElementById('amountM');
+        const splitTypeSelect = document.getElementById('splitType');
+        const customSplitFields = document.getElementById('custom-split-fields');
+        const expenseForm = document.getElementById('expense-form');
+        const recentRecordsList = document.getElementById('recent-records');
+        const balanceCard = document.getElementById('balance-card');
+        const balanceStatusText = document.getElementById('balance-status-text');
+        const balanceAmountElement = document.getElementById('balance-amount');
+        const userInfoElement = document.getElementById('user-info');
+        const errorMessageElement = document.getElementById('error-message');
+        
+        // 名稱設定 DOM
+        const hNameInput = document.getElementById('h-name-input');
+        const mNameInput = document.getElementById('m-name-input');
+        const saveNamesBtn = document.getElementById('save-names-btn');
+        const toggleSettingsBtn = document.getElementById('toggle-settings');
+        const settingsContent = document.getElementById('settings-content');
+        const settingsChevron = document.getElementById('settings-chevron');
+        const payerSelect = document.getElementById('payer');
+        
+        // 設置預設日期為今天
+        document.getElementById('recordDate').valueAsDate = new Date();
+
+
+        // 顯示模組化提示框
+        const showModal = (message) => {
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-container').classList.remove('hidden');
+        };
+
+        // 處理 Firebase 錯誤
+        const handleFirebaseError = (error, action = '操作') => {
+            console.error(`Firebase 錯誤 [${action}]:`, error);
+            const msg = `[${action}失敗] 請檢查網路連線或稍後再試。`;
+            showModal(msg);
+        };
+
+        // 初始化 Firebase
+        try {
+            // 從全域變數獲取配置
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'hnm-spliter-default';
+            const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+            if (Object.keys(firebaseConfig).length === 0) {
+                console.error('Firebase 配置缺失！無法初始化應用程式。');
+                showModal('應用程式配置缺失，無法連接至資料庫。');
+            } else {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 設置身份驗證狀態監聽
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userInfoElement.textContent = `User ID: ${userId}`;
+                        isAuthReady = true;
+                        // 身份驗證完成後，啟動資料監聽
+                        setupDataListeners();
+                    } else {
+                        // 如果沒有用戶，嘗試使用自定義 token 或匿名登入
+                        const customToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                        
+                        if (customToken) {
+                            signInWithCustomToken(auth, customToken).catch(err => {
+                                handleFirebaseError(err, '自定義登入');
+                                signInAnonymously(auth).catch(err => handleFirebaseError(err, '匿名登入'));
+                            });
+                        } else {
+                            signInAnonymously(auth).catch(err => handleFirebaseError(err, '匿名登入'));
+                        }
+                    }
+                });
+            }
+
+        } catch (error) {
+            handleFirebaseError(error, '初始化');
+        }
+
+        // --- 資料庫路徑 ---
+        const getExpensesCollectionRef = () => {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'hnm-spliter-default';
+            return collection(db, `artifacts/${appId}/public/data/expenses`);
+        };
+
+        const getBalanceDocRef = () => {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'hnm-spliter-default';
+            return doc(db, `artifacts/${appId}/public/data/balances/hnm-balance`);
+        };
+        
+        // 新增：設定文件路徑 (儲存 H/M 名稱)
+        const getSettingsDocRef = () => {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'hnm-spliter-default';
+            return doc(db, `artifacts/${appId}/public/data/settings/party-names`);
+        };
+
+
+        // --- 資料庫操作與監聽 ---
+
+        // 設置即時資料監聽器
+        const setupDataListeners = () => {
+            if (!isAuthReady || !db) return;
+
+            // 1. 監聽名稱設定
+            setupNamesListener();
+
+            // 2. 監聽最近五筆紀錄
+            const qRecords = query(getExpensesCollectionRef(), orderBy("recordTimestamp", "desc"), limit(5));
+            onSnapshot(qRecords, (snapshot) => {
+                const records = [];
+                snapshot.forEach(doc => {
+                    records.push({ id: doc.id, ...doc.data() });
+                });
+                // 紀錄渲染依賴於 PARTY_NAMES，當名稱更新時會自動觸發重繪
+                renderRecentRecords(records); 
+            }, (error) => handleFirebaseError(error, '監聽紀錄'));
+
+            // 3. 監聽總欠款狀態
+            onSnapshot(getBalanceDocRef(), (docSnapshot) => {
+                if (docSnapshot.exists()) {
+                    const balanceData = docSnapshot.data();
+                    const balance = balanceData.balance || 0;
+                    const currency = balanceData.currency || 'TWD';
+                    // 欠款渲染依賴於 PARTY_NAMES，當名稱更新時會自動觸發重繪
+                    renderBalance(balance, currency);
+                } else {
+                    renderBalance(0, 'TWD');
+                }
+            }, (error) => handleFirebaseError(error, '監聽欠款'));
+        };
+
+        // 監聽名稱設定
+        const setupNamesListener = () => {
+            onSnapshot(getSettingsDocRef(), (docSnapshot) => {
+                let changed = false;
+                if (docSnapshot.exists()) {
+                    const names = docSnapshot.data();
+                    if (names.HName && PARTY_NAMES['H'] !== names.HName) {
+                        PARTY_NAMES['H'] = names.HName;
+                        changed = true;
+                    }
+                    if (names.MName && PARTY_NAMES['M'] !== names.MName) {
+                        PARTY_NAMES['M'] = names.MName;
+                        changed = true;
+                    }
+                }
+                // 只有在名稱實際改變時才更新 UI
+                if (changed) {
+                    updatePartyNamesUI();
+                } else {
+                    // 初始化時，如果 Firebase 沒有設定，則用預設值填充輸入框
+                    hNameInput.value = PARTY_NAMES['H'];
+                    mNameInput.value = PARTY_NAMES['M'];
+                    updatePartyNamesUI(); // 確保初始渲染正確
+                }
+                
+            }, (error) => console.error('監聽名稱設定失敗:', error));
+        };
+
+        // --- UI 渲染功能 ---
+        
+        // 更新所有使用 H/M 名稱的 UI 元素
+        const updatePartyNamesUI = () => {
+            // 1. 更新名稱設定輸入框 (如果不是當前編輯狀態)
+            if (document.activeElement !== hNameInput) hNameInput.value = PARTY_NAMES['H'];
+            if (document.activeElement !== mNameInput) mNameInput.value = PARTY_NAMES['M'];
+
+            // 2. 更新付款人下拉選單
+            if (payerSelect.options[0]) payerSelect.options[0].textContent = PARTY_NAMES['H'];
+            if (payerSelect.options[1]) payerSelect.options[1].textContent = PARTY_NAMES['M'];
+            
+            // 3. 更新自訂金額的標籤
+            document.querySelector('label[for="amountH"]').textContent = `${PARTY_NAMES['H']} 應付金額`;
+            document.querySelector('label[for="amountM"]').textContent = `${PARTY_NAMES['M']} 應付金額`;
+        };
+
+
+        // 渲染欠款狀態
+        const renderBalance = (balance, currency) => {
+            const isOwed = balance > 0;
+            const isDebt = balance < 0;
+            const absBalance = Math.abs(balance).toFixed(2);
+            const currencySymbol = getCurrencySymbol(currency);
+            
+            balanceCard.classList.remove('bg-secondary', 'bg-danger', 'bg-gray-400');
+
+            if (isOwed) {
+                // M 欠 H (我被欠錢)
+                balanceCard.classList.add('bg-secondary'); // 綠色：優勢
+                balanceStatusText.textContent = `${PARTY_NAMES['M']} 欠 ${PARTY_NAMES['H']} (我方優勢)`;
+            } else if (isDebt) {
+                // H 欠 M (我欠別人錢)
+                balanceCard.classList.add('bg-danger'); // 紅色：劣勢
+                balanceStatusText.textContent = `${PARTY_NAMES['H']} 欠 ${PARTY_NAMES['M']} (我方劣勢)`;
+            } else {
+                // 結清
+                balanceCard.classList.add('bg-gray-400');
+                balanceStatusText.textContent = `目前已結清`;
+            }
+
+            balanceAmountElement.textContent = `${currencySymbol} ${absBalance}`;
+        };
+
+        // 渲染最近紀錄
+        const renderRecentRecords = (records) => {
+            recentRecordsList.innerHTML = ''; // 清空列表
+            if (records.length === 0) {
+                recentRecordsList.innerHTML = '<li class="text-gray-500 text-center py-4">目前沒有任何紀錄。</li>';
+                return;
+            }
+
+            records.forEach(record => {
+                const currencySymbol = getCurrencySymbol(record.currency);
+                
+                // 決定顯示的金額顏色和格式
+                let amountText = '';
+                let amountClass = 'text-gray-800';
+                
+                if (record.splitType === 'equal') {
+                    const splitAmount = (record.totalAmount / 2).toFixed(2);
+                    amountText = `總額: ${currencySymbol} ${record.totalAmount.toFixed(2)} | 均分: ${currencySymbol} ${splitAmount}`;
+                } else {
+                    const H_Paid = record.amountH || 0;
+                    const M_Paid = record.amountM || 0;
+                    // 使用當前 PARTY_NAMES
+                    amountText = `${PARTY_NAMES['H']}應付: ${currencySymbol} ${H_Paid.toFixed(2)}, ${PARTY_NAMES['M']}應付: ${currencySymbol} ${M_Paid.toFixed(2)}`;
+                }
+
+                const listItem = document.createElement('li');
+                listItem.className = 'flex justify-between items-start p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition duration-150';
+                listItem.innerHTML = `
+                    <div class="flex-grow">
+                        <p class="text-sm font-semibold">${record.description}</p>
+                        <p class="text-xs text-gray-500 mt-1">${new Date(record.recordDate).toLocaleDateString()} / 付款人: ${PARTY_NAMES[record.payer]}</p>
+                    </div>
+                    <div class="text-right ml-4">
+                        <p class="text-sm font-medium ${amountClass}">${amountText}</p>
+                        <p class="text-xs text-gray-400 mt-1">${record.splitType === 'equal' ? '均分' : '自訂'}</p>
+                    </div>
+                `;
+                recentRecordsList.appendChild(listItem);
+            });
+        };
+
+        // 獲取貨幣符號
+        const getCurrencySymbol = (currency) => {
+            switch (currency) {
+                case 'TWD': return 'NT$';
+                case 'JPY': return '¥';
+                case 'USD': return '$';
+                default: return '';
+            }
+        };
+
+        // --- 表單及設定邏輯 ---
+
+        // 名稱設定儲存
+        saveNamesBtn.addEventListener('click', async () => {
+            const HName = hNameInput.value.trim();
+            const MName = mNameInput.value.trim();
+
+            if (!HName || !MName) {
+                showModal('請輸入雙方的名稱。');
+                return;
+            }
+            if (!isAuthReady) {
+                 showModal('資料庫尚未連線，請稍候再試。');
+                return;
+            }
+
+            try {
+                // 使用 setDoc 儲存設定
+                await setDoc(getSettingsDocRef(), {
+                    HName: HName,
+                    MName: MName,
+                    lastUpdated: serverTimestamp(),
+                }, { merge: true });
+                
+                // 立即更新前端的 PARTY_NAMES (onSnapshot 會在背景處理，但這可以立即反應)
+                PARTY_NAMES['H'] = HName;
+                PARTY_NAMES['M'] = MName;
+                updatePartyNamesUI();
+                
+                showModal('名稱已成功儲存並同步！');
+                
+                // 隱藏設定區塊
+                settingsContent.classList.add('hidden');
+                settingsChevron.classList.remove('rotate-180');
+                
+            } catch (error) {
+                handleFirebaseError(error, '儲存名稱');
+            }
+        });
+
+        // 展開/收合設定區塊
+        toggleSettingsBtn.addEventListener('click', () => {
+            settingsContent.classList.toggle('hidden');
+            settingsChevron.classList.toggle('rotate-180');
+        });
+
+
+        // 均分/自訂 切換邏輯
+        splitTypeSelect.addEventListener('change', () => {
+            if (splitTypeSelect.value === 'custom') {
+                customSplitFields.classList.remove('hidden');
+                // 預設將總金額設定為H的應付金額，M為0 (使用者需要修改)
+                // 觸發一次自訂金額計算，確保輸入框值正確
+                updateCustomSplit(totalAmountInput); 
+            } else {
+                customSplitFields.classList.add('hidden');
+                amountHInput.value = '';
+                amountMInput.value = '';
+            }
+        });
+
+        // 自訂金額自動計算邏輯
+        totalAmountInput.addEventListener('input', () => updateCustomSplit(totalAmountInput));
+        amountHInput.addEventListener('input', () => updateCustomSplit(amountHInput));
+        amountMInput.addEventListener('input', () => updateCustomSplit(amountMInput));
+
+        function updateCustomSplit(changedInput) {
+            if (splitTypeSelect.value !== 'custom') return;
+
+            const total = parseFloat(totalAmountInput.value) || 0;
+            
+            if (changedInput === amountHInput && total >= 0) {
+                const amountH = parseFloat(amountHInput.value) || 0;
+                const remaining = total - amountH;
+                amountMInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            } else if (changedInput === amountMInput && total >= 0) {
+                const amountM = parseFloat(amountMInput.value) || 0;
+                const remaining = total - amountM;
+                amountHInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            } else if (changedInput === totalAmountInput) {
+                 // 當總金額改變，保持 H 金額不變，M 金額變動
+                 const amountH = parseFloat(amountHInput.value) || 0;
+                 const remaining = total - amountH;
+                 amountMInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            }
+        }
+        
+        // 提交表單處理 (不變)
+        expenseForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessageElement.classList.add('hidden');
+            errorMessageElement.textContent = '';
+
+            if (!isAuthReady) {
+                showModal('資料庫尚未連線，請稍候再試。');
+                return;
+            }
+
+            const totalAmount = parseFloat(totalAmountInput.value);
+            const currency = document.getElementById('currency').value;
+            const payer = document.getElementById('payer').value;
+            const description = document.getElementById('description').value.trim();
+            const splitType = splitTypeSelect.value;
+            const recordDateString = document.getElementById('recordDate').value;
+            const recordDate = recordDateString ? new Date(recordDateString).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+            let amountH = 0;
+            let amountM = 0;
+            
+            if (isNaN(totalAmount) || totalAmount <= 0 || !description) {
+                errorMessageElement.textContent = '請輸入有效總金額和描述。';
+                errorMessageElement.classList.remove('hidden');
+                return;
+            }
+
+            if (splitType === 'equal') {
+                amountH = totalAmount / 2;
+                amountM = totalAmount / 2;
+            } else {
+                amountH = parseFloat(amountHInput.value) || 0;
+                amountM = parseFloat(amountMInput.value) || 0;
+                
+                if ((amountH + amountM).toFixed(2) !== totalAmount.toFixed(2)) {
+                    errorMessageElement.textContent = '自訂金額總和與總金額不符！請檢查。';
+                    errorMessageElement.classList.remove('hidden');
+                    return;
+                }
+            }
+
+            // 淨借貸定義：M 應付給 H 的金額 (正數為 M 欠 H, 負數為 H 欠 M)
+            let netDebtChange = 0;
+
+            if (payer === 'H') {
+                // H 付款 TotalAmount。H 應付 amountH, M 應付 amountM。
+                // H 墊付了 M 的 amountM
+                netDebtChange = amountM; 
+            } else { // payer === 'M'
+                // M 付款 TotalAmount。H 應付 amountH, M 應付 amountM。
+                // M 墊付了 H 的 amountH
+                netDebtChange = -amountH; 
+            }
+
+            const newExpense = {
+                totalAmount: totalAmount,
+                currency: currency,
+                payer: payer, // H 或 M
+                description: description,
+                splitType: splitType,
+                amountH: amountH, // H 應付金額
+                amountM: amountM, // M 應付金額
+                netDebtChange: netDebtChange, // 對總平衡的影響 (M 欠 H 的金額變化)
+                recordDate: recordDate, // YYYY-MM-DD string
+                recordTimestamp: serverTimestamp(), // 用於排序
+                recordedBy: userId,
+            };
+
+            try {
+                // 1. 寫入新紀錄
+                await addDoc(getExpensesCollectionRef(), newExpense);
+                
+                // 2. 更新總欠款 (原子操作)
+                const balanceDocRef = getBalanceDocRef();
+                const balanceSnapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/balances`)));
+                let currentBalance = 0;
+
+                if (!balanceSnapshot.empty) {
+                    const doc = balanceSnapshot.docs[0];
+                    currentBalance = doc.data().balance || 0;
+                }
+                
+                const newBalance = currentBalance + netDebtChange;
+
+                await setDoc(balanceDocRef, {
+                    balance: newBalance,
+                    currency: currency,
+                    lastUpdated: serverTimestamp(),
+                }, { merge: true });
+
+                // 重設表單
+                expenseForm.reset();
+                document.getElementById('recordDate').valueAsDate = new Date();
+                splitTypeSelect.value = 'equal';
+                customSplitFields.classList.add('hidden');
+                totalAmountInput.focus();
+
+            } catch (error) {
+                handleFirebaseError(error, '儲存紀錄');
+            }
+        });
+        
+        // 應用程式啟動時，預設執行一次自訂金額更新（以防總金額有值）
+        document.addEventListener('DOMContentLoaded', () => {
+            updateCustomSplit(totalAmountInput);
+        });
+
+    </script>
+</body>
+</html>
