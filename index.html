@@ -25,23 +25,17 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; }
-        .app-container { max-width: 480px; margin: 0 auto; min-height: 100vh; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.05); position: relative; overflow-x: hidden; }
+        .app-container { max-width: 480px; margin: 0 auto; min-height: 10vh; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.05); position: relative; overflow-x: hidden; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         /* Basic animations for transitions */
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* Calculator specific styles */
-        .calc-button {
-            @apply p-4 rounded-xl font-bold text-2xl transition-colors shadow-md active:scale-95;
-            line-height: 1;
-        }
-        /* New style for tall OK button */
-        .calc-button.tall {
-            /* Adjust padding and line-height for double height effect */
-            height: calc(100% * 2 + 12px); /* 100% (one row height) * 2 + 12px (one gap) */
-            @apply flex items-center justify-center;
+        /* Fix for number input arrows */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+          -webkit-appearance: none; 
+          margin: 0; 
         }
     </style>
 </head>
@@ -49,13 +43,15 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef, useCallback } = React;
+        // --- 核心模組引用 ---
+        // 移除所有與計算機相關的 state/ref (activeInputRef, isCalculatorOpen, calculatorValue)
+        const { useState, useEffect, useMemo, useCallback } = React;
         
         // --- Icons Components (Lucide) ---
         const Icons = {
             Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
             History: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74-2.74L3 12"/><path d="M3 3v9h9"/></svg>,
-            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l-.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
+            Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l-.15-.09a2 2 0 0 0 .73-2.73l.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
             CheckCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
             RefreshCw: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 12"/><path d="M21 3v9h-9"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 12"/><path d="M3 21v-9h9"/></svg>,
             ArrowLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>,
@@ -63,7 +59,7 @@
             Split: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>,
             Coins: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m7.1 10.28 1.4-1.428m-1.428 0 1.428 1.428"/></svg>,
             Delete: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M10 12v4"/><path d="M14 12v4"/><path d="M21 6v14c0 1-1 2-2 2H5c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
-            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.5-2.5"/><path d="M20 12h-4"/><path d="m16.2 16.2 2.5 2.5"/><path d="M12 20v-4"/><path d="m7.8 16.2-2.5 2.5"/><path d="M4 12h4"/><path d="m7.8 7.8-2.5-2.5"/></svg>,
         };
 
         // --- Utils ---
@@ -115,186 +111,6 @@
             return { Modal, show };
         };
 
-        // --- Calculator Component ---
-        const CalculatorModal = ({ initialValue, onClose, onOk, showToast }) => {
-            const [display, setDisplay] = useState(initialValue || '0');
-            const [expression, setExpression] = useState(initialValue || '0');
-            const [isResult, setIsResult] = useState(true);
-
-            useEffect(() => {
-                // Set initial state on mount
-                const cleanValue = initialValue ? initialValue.replace(/[^0-9.+-/*]/g, '') : '0';
-                setDisplay(cleanValue);
-                setExpression(cleanValue);
-                setIsResult(true);
-            }, [initialValue]);
-
-            const handleInput = (value) => {
-                if (isResult) {
-                    // Start new calculation
-                    setDisplay(value === '.' ? '0.' : value);
-                    setExpression(value);
-                    setIsResult(false);
-                } else {
-                    // Append to current expression
-                    let newDisplay = (display === '0' && value !== '.') ? value : display + value;
-                    let newExpression = expression + value;
-                    
-                    // Simple logic to prevent leading zero issue on display
-                    if (display === '0' && value !== '.') {
-                         newExpression = expression.slice(0, expression.length - 1) + value; // Replace the 0
-                         newDisplay = value;
-                    }
-
-                    setDisplay(newDisplay);
-                    setExpression(newExpression);
-                }
-            };
-
-            const handleOperator = (op) => {
-                const lastChar = expression.slice(-1);
-                
-                if (op === '-' && ('+-/*('.includes(lastChar) || expression === '0')) {
-                    // Allow negative sign after an operator or at start
-                    setExpression(expression + op);
-                    setDisplay(op); // Display just the operator for context
-                    setIsResult(false);
-                    return;
-                }
-                
-                if ('+-*/'.includes(lastChar)) {
-                    // Replace operator
-                    const newExpression = expression.slice(0, -1) + op;
-                    setExpression(newExpression);
-                } else if (expression !== '' && !isResult) {
-                    // Calculate intermediate result and append operator
-                    try {
-                        let currentResult = String(eval(expression));
-                        setExpression(currentResult + op);
-                        setDisplay('');
-                        setIsResult(false);
-                    } catch (e) {
-                        showToast('錯誤的運算式');
-                        setExpression('0');
-                        setDisplay('0');
-                        setIsResult(true);
-                    }
-                }
-            };
-
-            const handleClear = () => {
-                setDisplay('0');
-                setExpression('0');
-                setIsResult(true);
-            };
-
-            const handleBackspace = () => {
-                if (isResult) return;
-                
-                const newExpression = expression.slice(0, -1);
-                setExpression(newExpression || '0');
-                
-                if (newExpression === '') {
-                    setDisplay('0');
-                    setIsResult(true);
-                } else {
-                    // Update display to show the last number/segment
-                    const match = newExpression.match(/(\d+\.?\d*)$/);
-                    setDisplay(match ? match[1] : '');
-                }
-            };
-
-            const handleCalculate = () => {
-                try {
-                    const safeExpression = expression.replace(/[^-()\d/*+.]/g, '');
-                    if (!safeExpression) return;
-                    
-                    let result = eval(safeExpression);
-                    result = Math.round(result * 10000) / 10000; 
-
-                    setExpression(String(result));
-                    setDisplay(String(result));
-                    setIsResult(true);
-                    return result;
-
-                } catch (e) {
-                    showToast('錯誤的運算式');
-                    setExpression('0');
-                    setDisplay('0');
-                    setIsResult(true);
-                    return 0;
-                }
-            };
-
-            const handleOk = () => {
-                let finalResult = handleCalculate();
-                if (typeof finalResult === 'number' && !isNaN(finalResult)) {
-                    // Pass the result string formatted to 2 decimal places to the parent
-                    onOk(finalResult.toFixed(2));
-                } else {
-                    onClose();
-                }
-            };
-
-            const Button = ({ children, onClick, className = 'bg-gray-100 hover:bg-gray-200 text-gray-800', isTall = false }) => (
-                <button
-                    onClick={onClick}
-                    className={`calc-button ${className} ${isTall ? 'row-span-2 tall' : ''}`}
-                >
-                    {children}
-                </button>
-            );
-
-            return (
-                <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-[480px] h-[65vh] bg-white z-[9999] flex flex-col justify-end animate-fade-in p-4 rounded-t-3xl shadow-[0_-10px_30px_rgba(0,0,0,0.1)]">
-                    {/* Display */}
-                    <div className="flex-grow flex flex-col justify-end p-4 mb-4 rounded-xl bg-gray-50 shadow-inner">
-                        <div className="text-right text-gray-500 text-lg h-6 overflow-hidden whitespace-nowrap">
-                            {expression}
-                        </div>
-                        <div className="text-right text-gray-900 font-extrabold text-5xl h-14 overflow-hidden">
-                            {display}
-                        </div>
-                    </div>
-
-                    {/* Buttons */}
-                    <div className="grid grid-cols-4 grid-rows-5 gap-3 mb-4 h-full max-h-[60%]">
-                        {/* Row 1 */}
-                        <Button onClick={handleClear} className="bg-rose-100 hover:bg-rose-200 text-rose-600">C</Button>
-                        <Button onClick={handleBackspace} className="bg-rose-100 hover:bg-rose-200 text-rose-600 col-span-2"><Icons.Delete size={24} /></Button>
-                        <Button onClick={() => handleOperator('/')} className="bg-teal-100 hover:bg-teal-200 text-teal-600">÷</Button>
-
-                        {/* Row 2 */}
-                        <Button onClick={() => handleInput('7')}>7</Button>
-                        <Button onClick={() => handleInput('8')}>8</Button>
-                        <Button onClick={() => handleInput('9')}>9</Button>
-                        <Button onClick={() => handleOperator('*')} className="bg-teal-100 hover:bg-teal-200 text-teal-600">×</Button>
-                        
-                        {/* Row 3 */}
-                        <Button onClick={() => handleInput('4')}>4</Button>
-                        <Button onClick={() => handleInput('5')}>5</Button>
-                        <Button onClick={() => handleInput('6')}>6</Button>
-                        <Button onClick={() => handleOperator('-')} className="bg-teal-100 hover:bg-teal-200 text-teal-600">-</Button>
-
-                        {/* Row 4 */}
-                        <Button onClick={() => handleInput('1')}>1</Button>
-                        <Button onClick={() => handleInput('2')}>2</Button>
-                        <Button onClick={() => handleInput('3')}>3</Button>
-                        {/* OK Button: Single column, double row height */}
-                        <Button onClick={handleOk} className="bg-teal-600 hover:bg-teal-700 text-white" isTall={true}>OK</Button>
-                        
-                        {/* Row 5 */}
-                        <Button onClick={() => handleInput('0')} col-span-2>0</Button>
-                        <Button onClick={() => handleInput('.')} className="bg-gray-200 hover:bg-gray-300 text-gray-800">.</Button>
-                        <Button onClick={handleCalculate} className="bg-gray-200 hover:bg-gray-300 text-gray-800">=</Button>
-                    </div>
-                    {/* Close button for safety */}
-                    <button onClick={onClose} className="w-full text-center text-sm text-gray-500 py-1 hover:text-gray-700">關閉</button>
-                </div>
-            );
-        };
-
-
         // --- Main App ---
         const App = () => {
             const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs, setLogLevel } = window.FirebaseServices || {};
@@ -317,13 +133,10 @@
             const [baseRates, setBaseRates] = useState(DEFAULT_RATES);
             const [rateLoading, setRateLoading] = useState(false);
 
-            // Calculator State
+            // View State
             const [view, setView] = useState('HOME'); // HOME, ADD, SETTLE, HISTORY, SETTINGS
-            const [isCalcOpen, setIsCalcOpen] = useState(false);
-            const [calcTarget, setCalcTarget] = useState({ setter: null, initialValue: '' });
-            const focusElementRef = useRef(null); 
-
-            // Toast state (for calc errors)
+            
+            // Toast state 
             const [toast, setToast] = useState({ message: '', visible: false });
 
             // --- Firebase Setup ---
@@ -331,7 +144,7 @@
                 if (!initializeApp) {
                     showToast("錯誤：Firebase 服務無法加載。請檢查連線。");
                     setIsAuthReady(true);
-                    setDataLoading(false);
+                    setDataLoading(false); 
                     return;
                 }
                 
@@ -373,7 +186,7 @@
                 } catch (error) {
                     console.error("Firebase Initialization Error:", error);
                     setIsAuthReady(true);
-                    setDataLoading(false);
+                    setDataLoading(false); 
                 }
             }, []);
 
@@ -441,18 +254,12 @@
                 setTimeout(() => setToast({ message: '', visible: false }), 2000);
             };
 
-            const openCalculator = (setter, initialValue, event) => {
-                if(event && event.currentTarget) {
-                    focusElementRef.current = event.currentTarget;
-                }
-                setCalcTarget({ setter, initialValue });
-                setIsCalcOpen(true);
-            };
-
             // Fetch current exchange rates
             const fetchRates = async (currentRates) => {
                 setRateLoading(true);
                 try {
+                    // Using a dummy endpoint as the original one might be restricted or unstable
+                    // In a real app, this should be replaced with a reliable exchange rate API
                     const res = await fetch('https://api.exchangerate-api.com/v4/latest/TWD');
                     if (res.ok) {
                         const data = await res.json();
@@ -462,16 +269,13 @@
                                 JPY: parseFloat((1 / data.rates.JPY).toFixed(4))
                             };
                              await updateFirestoreData({ baseRates: newRates });
-                             await show('匯率已成功更新！');
+                            // Don't show success modal here to avoid annoying the user on every load
                         } else {
-                            await show('無法更新匯率，將使用上次儲存的值。', false);
+                            // Don't show failure modal on every load
                         }
-                    } else {
-                        await show('無法更新匯率，將使用上次儲存的值。', false);
-                    }
+                    } 
                 } catch (e) {
                     console.error("Rate fetch failed:", e);
-                    await show('無法連線到匯率服務，將使用上次儲存的值。', false);
                 } finally {
                     setRateLoading(false);
                 }
@@ -528,7 +332,8 @@
                     if (tx.payer === 'H') hPaid += amountTWD;
                     
                     if (tx.type === 'SETTLE') {
-                        if (tx.payer === 'M') {
+                        // Settlement is opposite of expense logic
+                        if (tx.payer === 'M') { // M settles H, means M paid H's share, so H's share increases (H owes less)
                              hShare += amountTWD;
                         } 
                     } else {
@@ -540,7 +345,9 @@
                         }
                     }
                 });
-
+                
+                // balance > 0 means H paid more than H should have paid (M owes H)
+                // balance < 0 means H paid less than H should have paid (H owes M)
                 return Math.round((hPaid - hShare) * 100) / 100;
             }, [transactions]);
 
@@ -548,7 +355,7 @@
                 return (
                     <div className="app-container flex items-center justify-center min-h-screen bg-gray-50">
                         <div className="flex flex-col items-center text-gray-500">
-                            <Icons.Loader size={36} className="text-teal-500 mb-3"/>
+                            <Icons.Loader size={36} className="text-teal-500 mb-3 animate-spin"/> 
                             <p className="font-medium">載入中，請稍候...</p>
                         </div>
                     </div>
@@ -675,23 +482,29 @@
 
                 // --- 自動計算邏輯 ---
                 const handleCustomHChange = (value) => {
-                    setCustomH(value);
-                    const hValue = parseFloat(value);
+                    // Only accept valid numbers or empty string
+                    const numericValue = value.replace(/[^0-9.]/g, '');
+                    setCustomH(numericValue);
+                    
+                    const hValue = parseFloat(numericValue);
                     if (!isNaN(hValue) && hValue >= 0 && totalAmount > 0) {
                         const mValue = Math.round((totalAmount - hValue) * 100) / 100;
                         setCustomM(mValue >= 0 ? mValue.toFixed(2) : '');
-                    } else if (value === '' && totalAmount > 0) {
+                    } else if (numericValue === '' && totalAmount > 0) {
                         setCustomM(totalAmount.toFixed(2));
                     }
                 };
 
                 const handleCustomMChange = (value) => {
-                    setCustomM(value);
-                    const mValue = parseFloat(value);
+                    // Only accept valid numbers or empty string
+                    const numericValue = value.replace(/[^0-9.]/g, '');
+                    setCustomM(numericValue);
+
+                    const mValue = parseFloat(numericValue);
                     if (!isNaN(mValue) && mValue >= 0 && totalAmount > 0) {
                         const hValue = Math.round((totalAmount - mValue) * 100) / 100;
                         setCustomH(hValue >= 0 ? hValue.toFixed(2) : '');
-                    } else if (value === '' && totalAmount > 0) {
+                    } else if (numericValue === '' && totalAmount > 0) {
                         setCustomH(totalAmount.toFixed(2));
                     }
                 };
@@ -752,7 +565,8 @@
                         date: new Date().toISOString(),
                         type: 'EXPENSE',
                         item,
-                        amount: totalAmount,
+                        // Ensure amount is stored as a number
+                        amount: totalAmount, 
                         currency,
                         rate: Number(rate),
                         payer,
@@ -773,17 +587,20 @@
                             {/* Amount & Currency */}
                             <div>
                                 <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">金額與幣別</label>
-                                <div className="flex gap-3">
+                                <div className="flex gap-3 items-center">
                                     <div className="relative flex-1">
-                                        <input 
-                                            type="text" 
-                                            readOnly // 關鍵：防止鍵盤彈出，強制使用自訂計算機
-                                            placeholder="0" 
-                                            value={amount} 
-                                            onFocus={(e) => openCalculator(setAmount, amount, e)} // 點擊時開啟計算機
-                                            className="w-full text-4xl font-bold text-gray-800 border-b-2 border-gray-200 focus:border-teal-500 outline-none py-2 bg-transparent placeholder-gray-300" 
-                                            autoFocus 
-                                        />
+                                        <div className="flex items-center gap-2"> 
+                                            <input 
+                                                type="number" // 啟用原生數字鍵盤
+                                                inputMode="decimal" // 確保手機顯示帶小數點的鍵盤
+                                                placeholder="0" 
+                                                value={amount} 
+                                                onChange={e => setAmount(e.target.value)} // 直接綁定 state
+                                                className="flex-1 text-4xl font-bold text-gray-800 border-b-2 border-gray-200 focus:border-teal-500 outline-none py-2 bg-transparent placeholder-gray-300" 
+                                                autoFocus
+                                            />
+                                            {/* 程式碼中**已移除**自訂計算機按鈕 */}
+                                        </div>
                                     </div>
                                     <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-gray-100 rounded-xl px-4 font-bold text-gray-700 border-none outline-none focus:ring-2 focus:ring-teal-500">
                                         <option value="TWD">TWD</option>
@@ -827,25 +644,31 @@
                                     <div className="grid grid-cols-2 gap-4 animate-fade-in">
                                         <div>
                                             <label className="text-xs text-gray-500 mb-1 block">{users.H} 應付 ({currency})</label>
-                                            <input 
-                                                type="text" 
-                                                readOnly 
-                                                value={customH} 
-                                                onFocus={(e) => openCalculator(handleCustomHChange, customH, e)}
-                                                className="w-full border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium focus:border-teal-500 outline-none" 
-                                                placeholder="0.00" 
-                                            />
+                                            <div className="relative flex items-center gap-2">
+                                                <input 
+                                                    type="number" // 啟用原生數字鍵盤
+                                                    inputMode="decimal"
+                                                    value={customH} 
+                                                    onChange={e => handleCustomHChange(e.target.value)} // 直接綁定 state
+                                                    className="flex-1 border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none" 
+                                                    placeholder="0.00" 
+                                                />
+                                                {/* 程式碼中**已移除**自訂計算機按鈕 */}
+                                            </div>
                                         </div>
                                         <div>
                                             <label className="text-xs text-gray-500 mb-1 block">{users.M} 應付 ({currency})</label>
-                                            <input 
-                                                type="text" 
-                                                readOnly 
-                                                value={customM} 
-                                                onFocus={(e) => openCalculator(handleCustomMChange, customM, e)}
-                                                className="w-full border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium focus:border-teal-500 outline-none" 
-                                                placeholder="0.00" 
-                                            />
+                                            <div className="relative flex items-center gap-2">
+                                                <input 
+                                                    type="number" // 啟用原生數字鍵盤
+                                                    inputMode="decimal"
+                                                    value={customM} 
+                                                    onChange={e => handleCustomMChange(e.target.value)} // 直接綁定 state
+                                                    className="flex-1 border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none" 
+                                                    placeholder="0.00" 
+                                                />
+                                                {/* 程式碼中**已移除**自訂計算機按鈕 */}
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -911,14 +734,15 @@
                             <div className="text-left space-y-6">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">實際還款金額</label>
-                                    <div className="flex gap-3">
+                                    <div className="flex gap-3 items-center"> 
                                         <input 
-                                            type="text" 
-                                            readOnly 
+                                            type="number" // 啟用原生數字鍵盤
+                                            inputMode="decimal"
                                             value={amount} 
-                                            onFocus={(e) => openCalculator(setAmount, amount, e)}
+                                            onChange={e => setAmount(e.target.value)} // 直接綁定 state
                                             className="flex-1 text-3xl font-bold border-b-2 border-gray-200 py-2 outline-none focus:border-teal-500" 
                                         />
+                                        {/* 程式碼中**已移除**自訂計算機按鈕 */}
                                         <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-gray-100 rounded-lg px-3 font-bold border-none outline-none">
                                             <option value="TWD">TWD</option>
                                             <option value="USD">USD</option>
@@ -1085,19 +909,7 @@
                     )}
                     
                     {renderView()}
-
-                    {/* 只有在 isCalcOpen 為 true 時才渲染計算機介面 */}
-                    {isCalcOpen && (
-                        <CalculatorModal
-                            initialValue={calcTarget.initialValue}
-                            onClose={() => setIsCalcOpen(false)} // 點擊關閉
-                            onOk={(result) => {
-                                calcTarget.setter(result); // 設定欄位值
-                                setIsCalcOpen(false); // 點擊 OK 後關閉
-                            }}
-                            showToast={showToast}
-                        />
-                    )}
+                    {/* CalculatorModal 組件已從這個檔案中移除 */}
                 </div>
             );
         };
