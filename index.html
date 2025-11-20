@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HnM Split | 無賴帳本 (Firestore)</title>
+    <title>HnM Split | 無賴帳本</title>
     <!-- React, ReactDOM, Babel for running JSX in browser -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -14,29 +14,30 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 
         // Expose Firebase modules globally for the Babel script to access
-        window.FirebaseServices = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs, setLogLevel };
+        window.FirebaseServices = { 
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, 
+            getFirestore, doc, setDoc, onSnapshot, updateDoc, setLogLevel 
+        };
     </script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; }
-        .app-container { max-width: 480px; margin: 0 auto; min-height: 10vh; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.05); position: relative; overflow-x: hidden; }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        /* Basic animations for transitions */
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .app-container { max-width: 480px; margin: 0 auto; min-height: 100vh; background: white; box-shadow: 0 0 25px rgba(0,0,0,0.1); position: relative; overflow-x: hidden; }
+        
         /* Fix for number input arrows */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { 
           -webkit-appearance: none; 
           margin: 0; 
         }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -44,12 +45,11 @@
 
     <script type="text/babel">
         // --- 核心模組引用 ---
-        // 移除所有與計算機相關的 state/ref (activeInputRef, isCalculatorOpen, calculatorValue)
         const { useState, useEffect, useMemo, useCallback } = React;
         
         // --- Icons Components (Lucide) ---
         const Icons = {
-            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
             History: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74-2.74L3 12"/><path d="M3 3v9h9"/></svg>,
             Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l-.15-.09a2 2 0 0 0 .73-2.73l.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
             CheckCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
@@ -58,18 +58,18 @@
             Trash2: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
             Split: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>,
             Coins: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m7.1 10.28 1.4-1.428m-1.428 0 1.428 1.428"/></svg>,
-            Delete: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M10 12v4"/><path d="M14 12v4"/><path d="M21 6v14c0 1-1 2-2 2H5c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
             Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.5-2.5"/><path d="M20 12h-4"/><path d="m16.2 16.2 2.5 2.5"/><path d="M12 20v-4"/><path d="m7.8 16.2-2.5 2.5"/><path d="M4 12h4"/><path d="m7.8 7.8-2.5-2.5"/></svg>,
         };
 
         // --- Utils ---
         const formatMoney = (amount) => {
+            // Use TWD formatting style for clarity
             return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
         };
 
         const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-        // Custom modal function instead of alert/confirm
+        // Custom modal hook for alerts/confirms
         const useModal = () => {
             const [isVisible, setIsVisible] = useState(false);
             const [message, setMessage] = useState('');
@@ -96,7 +96,7 @@
                         <p className="font-medium text-gray-800 mb-6">{message}</p>
                         <div className={`flex ${isConfirm ? 'justify-between' : 'justify-center'} gap-3`}>
                             {isConfirm && (
-                                <button onClick={() => handleClose(false)} className="flex-1 py-3 px-4 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200">
+                                <button onClick={() => handleClose(false)} className="flex-1 py-3 px-4 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors">
                                     取消
                                 </button>
                             )}
@@ -110,23 +110,22 @@
 
             return { Modal, show };
         };
-
+        
         // --- Main App ---
         const App = () => {
-            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs, setLogLevel } = window.FirebaseServices || {};
+            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, updateDoc, setLogLevel } = window.FirebaseServices || {};
 
             const { Modal, show } = useModal();
             
             // Firebase State
             const [db, setDb] = useState(null);
-            const [auth, setAuth] = useState(null);
             const [userId, setUserId] = useState(null);
             const [isAuthReady, setIsAuthReady] = useState(false);
             const [dataLoading, setDataLoading] = useState(true);
 
-            // Data State (Initial/Default values)
+            // Data State
             const DEFAULT_USERS = { H: 'H 方', M: 'M 方' };
-            const DEFAULT_RATES = { USD: 32.5, JPY: 0.21 };
+            const DEFAULT_RATES = { USD: 32.5, JPY: 0.21 }; // Fallback rates
             
             const [users, setUsers] = useState(DEFAULT_USERS);
             const [transactions, setTransactions] = useState([]);
@@ -139,19 +138,23 @@
             // Toast state 
             const [toast, setToast] = useState({ message: '', visible: false });
 
+            const showToast = (message) => {
+                setToast({ message, visible: true });
+                setTimeout(() => setToast({ message: '', visible: false }), 2000);
+            };
+
             // --- Firebase Setup ---
             useEffect(() => {
                 if (!initializeApp) {
-                    showToast("錯誤：Firebase 服務無法加載。請檢查連線。");
+                    // Firebase SDK not loaded. Proceed with fallback or show error.
                     setIsAuthReady(true);
                     setDataLoading(false); 
                     return;
                 }
                 
-                // setLogLevel('debug'); // For debugging
+                // setLogLevel('debug'); // Optional: For debugging
 
                 try {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                     const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
                     
                     const app = initializeApp(firebaseConfig);
@@ -159,7 +162,6 @@
                     const authInstance = getAuth(app);
                     
                     setDb(firestore);
-                    setAuth(authInstance);
 
                     const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
                         if (user) {
@@ -172,12 +174,12 @@
                                 } else {
                                     await signInAnonymously(authInstance);
                                 }
-                                // onAuthStateChanged will be called again with the signed-in user
                             } catch (error) {
                                 console.error("Firebase Auth Error:", error);
-                                setUserId(crypto.randomUUID()); // Fallback non-authenticated ID
+                                // Fallback ID for non-authenticated state (though Firestore rules might prevent access)
+                                setUserId(crypto.randomUUID()); 
                                 setIsAuthReady(true);
-                                show("身份驗證失敗，請檢查網路連線。", false);
+                                show("身份驗證失敗，將使用暫時模式。", false);
                             }
                         }
                     });
@@ -191,11 +193,21 @@
             }, []);
 
             // --- Firestore Data Listener ---
-            useEffect(() => {
-                if (!isAuthReady || !db || !userId) return;
-
+            const getDataDocRef = useCallback(() => {
+                if (!db || !userId) return null;
                 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const docRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'hnm_split_config');
+                // Private data path: /artifacts/{appId}/users/{userId}/data/hnm_split_config
+                return doc(db, 'artifacts', appId, 'users', userId, 'data', 'hnm_split_config');
+            }, [db, userId]);
+
+
+            useEffect(() => {
+                // 檢查關鍵依賴項是否準備好
+                if (!isAuthReady || !db || !userId) return;
+                
+                const docRef = getDataDocRef();
+                if (!docRef) return;
+
 
                 // Real-time listener for the configuration document
                 const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -224,65 +236,60 @@
                 fetchRates(baseRates);
 
                 return () => unsubscribe();
-            }, [isAuthReady, db, userId]);
-            
+            }, [isAuthReady, db, userId, getDataDocRef]); 
+
             // --- Firestore Write Operations ---
-            const getDataDocRef = useCallback(() => {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                return doc(db, 'artifacts', appId, 'users', userId, 'data', 'hnm_split_config');
-            }, [db, userId]);
-
-
             const updateFirestoreData = useCallback(async (updates) => {
-                if (!db || !userId) {
-                    show("資料庫未準備好，請稍候再試。", false);
-                    return;
+                if (!db || !userId || !isAuthReady) {
+                    show("錯誤：資料庫尚未連線或使用者未認證。請稍後再試。", false);
+                    return; 
                 }
                 const docRef = getDataDocRef();
+                if (!docRef) {
+                     show("錯誤：無法確定資料路徑。", false);
+                     return;
+                }
                 try {
                     await updateDoc(docRef, updates);
+                    showToast("資料已儲存！");
                 } catch (e) {
                     console.error("Error updating Firestore:", e);
                     show("資料更新失敗！請檢查網路連線。", false);
                 }
-            }, [db, userId, getDataDocRef]);
+            }, [db, userId, isAuthReady, getDataDocRef, showToast]);
 
             // --- Business Logic Functions ---
 
-            const showToast = (message) => {
-                setToast({ message, visible: true });
-                setTimeout(() => setToast({ message: '', visible: false }), 2000);
-            };
-
-            // Fetch current exchange rates
             const fetchRates = async (currentRates) => {
                 setRateLoading(true);
                 try {
-                    // Using a dummy endpoint as the original one might be restricted or unstable
-                    // In a real app, this should be replaced with a reliable exchange rate API
-                    const res = await fetch('https://api.exchangerate-api.com/v4/latest/TWD');
+                    // Using exchangerate.host as a reliable, free API for all bases
+                    // Fetching TWD/USD and TWD/JPY for ease of conversion from TWD
+                    const res = await fetch('https://api.exchangerate.host/latest?base=TWD&symbols=USD,JPY');
                     if (res.ok) {
                         const data = await res.json();
                         if (data && data.rates) {
+                            // Convert TWD rate to Base rate (e.g., USD/TWD)
                             const newRates = {
-                                USD: parseFloat((1 / data.rates.USD).toFixed(4)),
-                                JPY: parseFloat((1 / data.rates.JPY).toFixed(4))
+                                USD: parseFloat((1 / data.rates.USD).toFixed(4)), // 1 USD = X TWD
+                                JPY: parseFloat((1 / data.rates.JPY).toFixed(4))  // 1 JPY = X TWD
                             };
-                             await updateFirestoreData({ baseRates: newRates });
-                            // Don't show success modal here to avoid annoying the user on every load
-                        } else {
-                            // Don't show failure modal on every load
+                            await updateFirestoreData({ baseRates: newRates });
                         }
-                    } 
+                    } else {
+                        throw new Error('API request failed');
+                    }
                 } catch (e) {
-                    console.error("Rate fetch failed:", e);
+                    console.error("Rate fetch failed, using stored rates.", e);
+                    showToast("自動更新匯率失敗，請稍後再試或手動輸入。");
                 } finally {
                     setRateLoading(false);
                 }
             };
 
             const addTransaction = async (tx) => {
-                const newTransactions = [tx, ...transactions];
+                // Ensure date is included and transactions are sorted by date (newest first)
+                const newTransactions = [tx, ...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
                 await updateFirestoreData({ transactions: newTransactions });
                 setView('HOME');
             };
@@ -305,50 +312,103 @@
             };
 
             const clearAllData = async () => {
-                if (!db || !userId) return;
+                if (!db || !userId || !isAuthReady) {
+                    show("資料庫未準備好，無法清除。", false);
+                    return;
+                }
                 const docRef = getDataDocRef();
-                const initialData = { 
-                    users: DEFAULT_USERS, 
-                    transactions: [], 
-                    baseRates: DEFAULT_RATES
-                };
-                try {
-                    await setDoc(docRef, initialData);
-                    await show("所有資料已清除並重設。");
-                } catch (e) {
-                    console.error("Error clearing data:", e);
-                    show("清除資料失敗。", false);
+                if (!docRef) return;
+                
+                const confirmed = await show('確定要清除所有資料嗎？此動作無法復原。', true);
+
+                if (confirmed) {
+                    const initialData = { 
+                        users: DEFAULT_USERS, 
+                        transactions: [], 
+                        baseRates: DEFAULT_RATES
+                    };
+                    try {
+                        await setDoc(docRef, initialData);
+                        await show("所有資料已清除並重設。");
+                    } catch (e) {
+                        console.error("Error clearing data:", e);
+                        show("清除資料失敗。", false);
+                    }
                 }
             };
 
-            // Logic: Calculate Balance (Unchanged)
+            // Logic: Calculate Balance (核心分帳邏輯)
             const balance = useMemo(() => {
-                let hPaid = 0; // Total TWD H actually paid out
-                let hShare = 0; // Total TWD H *should* have paid (fair share)
+                let hPaid = 0; // H 實際支付的 TWD 總額
+                let hShare = 0; // H 應該分攤的 TWD 總額
                 
                 transactions.forEach(tx => {
                     const amountTWD = tx.amount * tx.rate;
                     
-                    if (tx.payer === 'H') hPaid += amountTWD;
-                    
+                    if (tx.payer === 'H') {
+                        hPaid += amountTWD;
+                    }
+
                     if (tx.type === 'SETTLE') {
-                        // Settlement is opposite of expense logic
-                        if (tx.payer === 'M') { // M settles H, means M paid H's share, so H's share increases (H owes less)
-                             hShare += amountTWD;
-                        } 
-                    } else {
+                        // SETTLE 紀錄：誰還錢，誰的債務就減少（或對方應得增加）
+                        if (tx.payer === 'M') { // M 還錢給 H
+                             hPaid -= amountTWD; // H 實際收到錢，所以淨支付減少
+                        } else { // H 還錢給 M
+                             hPaid += amountTWD; // H 實際支付錢，所以淨支付增加
+                        }
+                        // Settle does not affect 'share' logic, it affects 'paid' logic in the reverse way.
+                        // We will treat SETTLE records as an offset to hPaid.
+                        
+                    } else { // EXPENSE 支出紀錄
                         if (tx.splitType === 'EQUAL') {
                             hShare += amountTWD / 2;
                         } else {
-                            // customH and customM are already in transaction's currency, so multiply by rate
+                            // CustomH is in transaction's currency, so multiply by rate
                             hShare += Number(tx.customH || 0) * tx.rate;
                         }
                     }
                 });
                 
-                // balance > 0 means H paid more than H should have paid (M owes H)
-                // balance < 0 means H paid less than H should have paid (H owes M)
-                return Math.round((hPaid - hShare) * 100) / 100;
+                // balance > 0 意味著 H 支付的比應付的多 (M 欠 H)
+                // balance < 0 意味著 H 支付的比應付的少 (H 欠 M)
+                // 為了更精確的結算邏輯，我們將 SETTLE 視為 EXPENSE 的反向操作，並將其計入 hPaid。
+                
+                // 調整後的結算邏輯：
+                // 1. 計算所有 EXPENSE 中 H 實際應付的總額 (hShare)
+                // 2. 計算所有 EXPENSE/SETTLE 中 H 實際支付的總額 (hPaid)
+                
+                let totalHPaid = 0; // H 實際支付的總金額
+                let totalHShare = 0; // H 應付的總金額
+
+                transactions.forEach(tx => {
+                    const amountTWD = tx.amount * tx.rate;
+
+                    if (tx.type === 'EXPENSE') {
+                        // 1. 誰付錢，誰的支付額增加
+                        if (tx.payer === 'H') totalHPaid += amountTWD;
+
+                        // 2. 計算 H 應付的份額
+                        if (tx.splitType === 'EQUAL') {
+                            totalHShare += amountTWD / 2;
+                        } else {
+                            totalHShare += Number(tx.customH || 0) * tx.rate;
+                        }
+                    } else if (tx.type === 'SETTLE') {
+                        // SETTLE (還款): 視為一筆對淨支付的調整
+                        // 如果 H 還款給 M，H 的總支付增加
+                        if (tx.payer === 'H') {
+                            totalHPaid += amountTWD;
+                        } 
+                        // 如果 M 還款給 H，H 的總支付減少
+                        else { 
+                            totalHPaid -= amountTWD;
+                        }
+                    }
+                });
+
+                // totalHPaid - totalHShare: 如果大於 0，H 多付了 (M 欠 H)
+                return Math.round((totalHPaid - totalHShare) * 100) / 100;
+                
             }, [transactions]);
 
             if (dataLoading) {
@@ -356,7 +416,7 @@
                     <div className="app-container flex items-center justify-center min-h-screen bg-gray-50">
                         <div className="flex flex-col items-center text-gray-500">
                             <Icons.Loader size={36} className="text-teal-500 mb-3 animate-spin"/> 
-                            <p className="font-medium">載入中，請稍候...</p>
+                            <p className="font-medium">正在從 Firestore 載入資料...</p>
                         </div>
                     </div>
                 );
@@ -364,109 +424,116 @@
 
             // --- Views ---
 
-            const HomeView = () => (
-                <div className="pb-20 animate-fade-in">
-                    {/* Header */}
-                    <div className="bg-white p-6 rounded-b-3xl shadow-sm z-10 relative">
-                        <div className="flex justify-between items-center mb-6">
-                            <div className="flex items-center space-x-2">
-                                <div className="w-8 h-8 bg-teal-500 rounded flex items-center justify-center text-white font-bold text-sm shadow-md">HM</div>
-                                <span className="font-bold text-gray-800 tracking-tight">HnM Split <span className="text-xs text-gray-400 font-normal ml-1">無賴帳本</span></span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500 truncate max-w-[120px]">ID: {userId}</span>
+            const HomeView = () => {
+                // 排序，確保最新紀錄在最上面
+                const sortedTransactions = useMemo(() => {
+                    return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+                }, [transactions]);
+
+                return (
+                    <div className="pb-20 animate-fade-in">
+                        {/* Header & Balance Card */}
+                        <div className="bg-white p-6 rounded-b-3xl shadow-lg z-10 relative">
+                            
+                            <div className="flex justify-between items-center mb-6 pt-2">
+                                <div className="flex items-center space-x-2">
+                                    <div className="w-8 h-8 bg-teal-500 rounded-full flex items-center justify-center text-white font-black text-lg shadow-md">H M</div>
+                                    <span className="font-black text-gray-900 tracking-tight text-xl">無賴帳本 <span className="text-xs text-gray-400 font-normal ml-1">HnM Split</span></span>
+                                </div>
                                 <button onClick={() => setView('SETTINGS')} className="text-gray-400 p-2 rounded-full hover:bg-gray-100 transition-colors"><Icons.Settings /></button>
                             </div>
-                        </div>
 
-                        {/* Balance Card */}
-                        <div className="text-center py-4">
-                            <p className="text-gray-500 text-sm font-medium mb-1">目前狀態 (TWD)</p>
-                            {Math.abs(balance) < 1 ? (
-                                <div className="text-teal-500 font-bold text-3xl py-2 flex items-center justify-center gap-2">
-                                    <Icons.CheckCircle className="w-8 h-8"/> 帳目已清空
-                                </div>
-                            ) : (
-                                <>
-                                    <div className={`text-xl font-bold mb-2 ${balance > 0 ? users.M : users.H}應付給${balance > 0 ? users.H : users.M} ${balance > 0 ? 'text-teal-600' : 'text-rose-500'}`}>
-                                    {balance > 0 ? users.M : users.H} 
-                                        <span className="text-gray-500 text-base mx-1 font-normal">應付給</span> 
-                                        {balance > 0 ? users.H : users.M}
+                            {/* Balance Display (要求4: 醒目欄位) */}
+                            <div className="text-center py-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-inner">
+                                <p className="text-gray-500 text-sm font-medium mb-2 uppercase">目前結算狀態 (TWD)</p>
+                                {Math.abs(balance) < 1 ? (
+                                    <div className="text-teal-600 font-extrabold text-3xl py-2 flex items-center justify-center gap-2">
+                                        <Icons.CheckCircle className="w-8 h-8"/> 帳目已清空
                                     </div>
-                                    <div className={`text-5xl font-black tracking-tighter ${balance > 0 ? 'text-teal-800' : 'text-rose-700'}`}>
-                                        ${formatMoney(Math.abs(balance))}
-                                    </div>
-                                </>
-                            )}
+                                ) : (
+                                    <>
+                                        <div className={`text-lg font-bold mb-2 ${balance > 0 ? 'text-teal-600' : 'text-rose-500'}`}>
+                                            {balance > 0 ? users.M : users.H} 
+                                            <span className="text-gray-500 text-base mx-1 font-normal">欠</span> 
+                                            {balance > 0 ? users.H : users.M}
+                                        </div>
+                                        <div className={`text-5xl font-black tracking-tighter ${balance > 0 ? 'text-teal-800' : 'text-rose-700'}`}>
+                                            ${formatMoney(Math.abs(balance))}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            {/* Quick Actions */}
+                            <div className="grid grid-cols-2 gap-4 mt-6">
+                                <button 
+                                    onClick={() => setView('SETTLE')}
+                                    className="flex items-center justify-center gap-2 py-3 px-4 bg-teal-50 text-teal-700 rounded-xl font-bold hover:bg-teal-100 transition-colors shadow-md">
+                                    <Icons.Coins className="w-5 h-5" />
+                                    結算還款
+                                </button>
+                                <button 
+                                    onClick={() => setView('HISTORY')}
+                                    className="flex items-center justify-center gap-2 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors shadow-md">
+                                    <Icons.History className="w-5 h-5" />
+                                    交易紀錄
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Quick Actions */}
-                        <div className="grid grid-cols-2 gap-4 mt-8">
-                            <button 
-                                onClick={() => setView('SETTLE')}
-                                className="flex items-center justify-center gap-2 py-3 px-4 bg-teal-50 text-teal-700 rounded-xl font-bold hover:bg-teal-100 transition-colors">
-                                <Icons.Coins className="w-5 h-5" />
-                                結算還款
-                            </button>
-                            <button 
-                                onClick={() => setView('HISTORY')}
-                                className="flex items-center justify-center gap-2 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors">
-                                <Icons.History className="w-5 h-5" />
-                                交易紀錄
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Recent Transactions */}
-                    <div className="px-6 py-6">
-                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">最近紀錄</h3>
-                        <div className="space-y-3">
-                            {transactions.length === 0 ? (
-                                <div className="text-center text-gray-400 py-8 text-sm bg-white rounded-xl shadow-inner">還沒有紀錄，快去新增一筆吧！</div>
-                            ) : (
-                                transactions.slice(0, 5).map(tx => (
-                                    <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm flex justify-between items-center border border-gray-50">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner ${tx.type === 'SETTLE' ? 'bg-green-100 text-green-600' : 'bg-blue-50 text-blue-500'}`}>
-                                                {tx.type === 'SETTLE' ? <Icons.Coins size={18}/> : <Icons.Split size={18}/>}
-                                            </div>
-                                            <div>
-                                                <div className="font-bold text-gray-800">{tx.item}</div>
-                                                <div className="text-xs text-gray-400">
-                                                    {new Date(tx.date).toLocaleDateString()} • {tx.payer === 'H' ? users.H : users.M} 付款
+                        {/* Recent Transactions (要求5: 最近五筆) */}
+                        <div className="px-4 py-6">
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 border-b pb-2 mx-2">最近五筆紀錄</h3>
+                            <div className="space-y-3">
+                                {sortedTransactions.length === 0 ? (
+                                    <div className="text-center text-gray-400 py-8 text-sm bg-white rounded-xl shadow-inner border border-dashed">還沒有紀錄，快去新增一筆吧！</div>
+                                ) : (
+                                    sortedTransactions.slice(0, 5).map(tx => (
+                                        <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-sm flex justify-between items-center border border-gray-50 hover:shadow-md transition-shadow">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner ${tx.type === 'SETTLE' ? 'bg-green-100 text-green-600' : 'bg-blue-50 text-blue-500'}`}>
+                                                    {tx.type === 'SETTLE' ? <Icons.Coins size={18}/> : <Icons.Split size={18}/>}
+                                                </div>
+                                                <div>
+                                                    <div className="font-bold text-gray-800">{tx.item}</div>
+                                                    <div className="text-xs text-gray-400">
+                                                        {new Date(tx.date).toLocaleDateString('zh-TW')} • {tx.payer === 'H' ? users.H : users.M} 付款
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className={`font-bold ${tx.type === 'SETTLE' ? 'text-green-600' : 'text-gray-800'}`}>
-                                                {formatMoney(tx.amount)} <span className="text-xs">{tx.currency}</span>
+                                            <div className="text-right">
+                                                <div className={`font-bold ${tx.type === 'SETTLE' ? 'text-green-600' : 'text-gray-800'}`}>
+                                                    {formatMoney(tx.amount)} <span className="text-xs">{tx.currency}</span>
+                                                </div>
+                                                {tx.currency !== 'TWD' && (
+                                                    <div className="text-xs text-gray-400">≈ {formatMoney(tx.amount * tx.rate)} TWD</div>
+                                                )}
                                             </div>
-                                            {tx.currency !== 'TWD' && (
-                                                <div className="text-xs text-gray-400">≈ {formatMoney(tx.amount * tx.rate)} TWD</div>
-                                            )}
                                         </div>
-                                    </div>
-                                ))
-                            )}
+                                    ))
+                                )}
+                            </div>
                         </div>
+                        
+                        {/* FAB */}
+                        <button 
+                            onClick={() => setView('ADD')}
+                            className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-teal-600 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-xl hover:bg-teal-700 hover:scale-105 transition-all duration-200 z-50">
+                            <Icons.Plus size={32} />
+                        </button>
                     </div>
-                    
-                    {/* FAB */}
-                    <button 
-                        onClick={() => setView('ADD')}
-                        className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-teal-600 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-xl hover:bg-teal-700 hover:scale-105 transition-all duration-200 z-50">
-                        <Icons.Plus size={32} />
-                    </button>
-                </div>
-            );
+                );
+            };
 
             const AddView = () => {
+                const today = new Date().toISOString().split('T')[0];
+                const [date, setDate] = useState(today); // 要求6: 紀錄日期
                 const [amount, setAmount] = useState('');
                 const [item, setItem] = useState('');
                 const [currency, setCurrency] = useState('TWD');
-                const [payer, setPayer] = useState('H'); // Default H
+                const [payer, setPayer] = useState('H'); 
                 const [splitType, setSplitType] = useState('EQUAL');
-                const [rate, setRate] = useState(baseRates.USD); // Initial rate will be fixed in useEffect
+                const [rate, setRate] = useState(1);
                 const [customH, setCustomH] = useState('');
                 const [customM, setCustomM] = useState('');
 
@@ -474,77 +541,56 @@
 
                 // Update rate when currency changes
                 useEffect(() => {
-                    if (currency === 'TWD') setRate(1);
-                    else if (currency === 'USD') setRate(baseRates.USD);
-                    else if (currency === 'JPY') setRate(baseRates.JPY);
-                    if(rate === 0 || isNaN(rate)) setRate(1);
+                    let newRate = 1;
+                    if (currency === 'USD') newRate = baseRates.USD;
+                    else if (currency === 'JPY') newRate = baseRates.JPY;
+                    setRate(Number(newRate) || 1); 
                 }, [currency, baseRates]);
-
-                // --- 自動計算邏輯 ---
-                const handleCustomHChange = (value) => {
-                    // Only accept valid numbers or empty string
-                    const numericValue = value.replace(/[^0-9.]/g, '');
-                    setCustomH(numericValue);
-                    
-                    const hValue = parseFloat(numericValue);
-                    if (!isNaN(hValue) && hValue >= 0 && totalAmount > 0) {
-                        const mValue = Math.round((totalAmount - hValue) * 100) / 100;
-                        setCustomM(mValue >= 0 ? mValue.toFixed(2) : '');
-                    } else if (numericValue === '' && totalAmount > 0) {
-                        setCustomM(totalAmount.toFixed(2));
-                    }
-                };
-
-                const handleCustomMChange = (value) => {
-                    // Only accept valid numbers or empty string
-                    const numericValue = value.replace(/[^0-9.]/g, '');
-                    setCustomM(numericValue);
-
-                    const mValue = parseFloat(numericValue);
-                    if (!isNaN(mValue) && mValue >= 0 && totalAmount > 0) {
-                        const hValue = Math.round((totalAmount - mValue) * 100) / 100;
-                        setCustomH(hValue >= 0 ? hValue.toFixed(2) : '');
-                    } else if (numericValue === '' && totalAmount > 0) {
-                        setCustomH(totalAmount.toFixed(2));
-                    }
-                };
                 
+                // --- 智慧分帳邏輯 (要求3) ---
+                const handleCustomChange = useCallback((party, value) => {
+                    const numericValue = value.replace(/[^0-9.]/g, '');
+                    const floatValue = parseFloat(numericValue) || 0;
+
+                    if (party === 'H') {
+                        setCustomH(numericValue);
+                        if (totalAmount > 0) {
+                            const remaining = Math.round((totalAmount - floatValue) * 100) / 100;
+                            setCustomM(remaining >= 0 ? remaining.toFixed(2) : '');
+                        } else {
+                            setCustomM('');
+                        }
+                    } else if (party === 'M') {
+                        setCustomM(numericValue);
+                        if (totalAmount > 0) {
+                            const remaining = Math.round((totalAmount - floatValue) * 100) / 100;
+                            setCustomH(remaining >= 0 ? remaining.toFixed(2) : '');
+                        } else {
+                            setCustomH('');
+                        }
+                    }
+                }, [totalAmount]);
+
+                // Auto-set equal split on change
                 useEffect(() => {
                     if (splitType === 'EQUAL' && totalAmount > 0) {
                         const equalSplit = (totalAmount / 2).toFixed(2);
                         setCustomH(equalSplit);
                         setCustomM(equalSplit);
-                    } else if (splitType === 'CUSTOM' && totalAmount > 0) {
-                        const currentH = Number(customH || 0);
-                        const currentM = Number(customM || 0);
-                        const totalCustom = Math.round((currentH + currentM) * 100) / 100;
-
-                        // Recalculate if the custom split doesn't match the total or if inputs are empty
-                        if (Math.abs(totalCustom - totalAmount) > 0.01) {
-                            if (currentH === 0 && currentM === 0) {
-                                setCustomH(totalAmount.toFixed(2));
-                                setCustomM('');
-                            } else if (currentM === 0) {
-                                // If M is empty, try to adjust M based on H
-                                const mValue = Math.round((totalAmount - currentH) * 100) / 100;
-                                setCustomM(mValue >= 0 ? mValue.toFixed(2) : '');
-                            } else if (currentH === 0) {
-                                // If H is empty, try to adjust H based on M
-                                const hValue = Math.round((totalAmount - currentM) * 100) / 100;
-                                setCustomH(hValue >= 0 ? hValue.toFixed(2) : '');
-                            }
-                        }
-                    } else if (totalAmount === 0 && splitType !== 'EQUAL') {
-                         setCustomH('');
-                         setCustomM('');
+                    } else if (splitType === 'EQUAL' && totalAmount === 0) {
+                        setCustomH('');
+                        setCustomM('');
                     }
                 }, [amount, splitType]);
-                // --- 結束自動計算邏輯 ---
-
+                // --- 結束智慧分帳邏輯 ---
 
                 const handleSubmit = async () => {
-                    if (!amount || !item) {
-                        return await show('請輸入金額和項目');
+                    if (!db || !userId || !isAuthReady) {
+                        return await show('錯誤：資料庫尚未連線或使用者未認證，請稍候再試。');
+                    }
+                    
+                    if (!amount || !item || !date) {
+                        return await show('請輸入金額、項目和日期');
                     }
                     if (totalAmount <= 0) {
                         return await show('金額必須大於零');
@@ -562,17 +608,16 @@
 
                     await addTransaction({
                         id: generateId(),
-                        date: new Date().toISOString(),
+                        date: new Date(date).toISOString(), // Use selected date
                         type: 'EXPENSE',
                         item,
-                        // Ensure amount is stored as a number
                         amount: totalAmount, 
                         currency,
                         rate: Number(rate),
                         payer,
                         splitType,
-                        customH: splitType === 'CUSTOM' ? finalCustomH : null,
-                        customM: splitType === 'CUSTOM' ? finalCustomM : null
+                        customH: splitType === 'CUSTOM' || splitType === 'EQUAL' ? finalCustomH : null,
+                        customM: splitType === 'CUSTOM' || splitType === 'EQUAL' ? finalCustomM : null
                     });
                 };
 
@@ -584,36 +629,11 @@
                         </div>
                         
                         <div className="p-6 space-y-6">
-                            {/* Amount & Currency */}
+                            {/* Date Selector (要求6) */}
                             <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">金額與幣別</label>
-                                <div className="flex gap-3 items-center">
-                                    <div className="relative flex-1">
-                                        <div className="flex items-center gap-2"> 
-                                            <input 
-                                                type="number" // 啟用原生數字鍵盤
-                                                inputMode="decimal" // 確保手機顯示帶小數點的鍵盤
-                                                placeholder="0" 
-                                                value={amount} 
-                                                onChange={e => setAmount(e.target.value)} // 直接綁定 state
-                                                className="flex-1 text-4xl font-bold text-gray-800 border-b-2 border-gray-200 focus:border-teal-500 outline-none py-2 bg-transparent placeholder-gray-300" 
-                                                autoFocus
-                                            />
-                                            {/* 程式碼中**已移除**自訂計算機按鈕 */}
-                                        </div>
-                                    </div>
-                                    <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-gray-100 rounded-xl px-4 font-bold text-gray-700 border-none outline-none focus:ring-2 focus:ring-teal-500">
-                                        <option value="TWD">TWD</option>
-                                        <option value="USD">USD</option>
-                                        <option value="JPY">JPY</option>
-                                    </select>
-                                </div>
-                                {currency !== 'TWD' && (
-                                    <div className="mt-3 bg-blue-50 p-3 rounded-lg flex items-center justify-between text-sm text-blue-800">
-                                        <span className="flex items-center gap-1">匯率 (1 {currency} = ) <input type="number" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} onBlur={e => setRate(Number(e.target.value) || 1)} className="w-16 border-b border-blue-300 bg-transparent text-center font-bold outline-none"/> TWD</span>
-                                        <span className="font-bold opacity-80">≈ {amount ? formatMoney(totalAmount * rate) : 0} TWD</span>
-                                    </div>
-                                )}
+                                <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">日期</label>
+                                <input type="date" value={date} onChange={e => setDate(e.target.value)} 
+                                    className="w-full text-lg text-gray-800 border-b border-gray-200 focus:border-teal-500 outline-none py-2 font-medium" />
                             </div>
 
                             {/* Item */}
@@ -623,58 +643,85 @@
                                     className="w-full text-lg text-gray-800 border-b border-gray-200 focus:border-teal-500 outline-none py-2" />
                             </div>
 
-                            {/* Payer */}
+                            {/* Amount & Currency (要求2) */}
                             <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-2 uppercase">誰付的錢？</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={() => setPayer('H')} className={`py-3 rounded-xl font-medium transition-all ${payer === 'H' ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.H}</button>
-                                    <button onClick={() => setPayer('M')} className={`py-3 rounded-xl font-medium transition-all ${payer === 'M' ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.M}</button>
+                                <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">金額與幣別</label>
+                                <div className="flex gap-3 items-center">
+                                    <input 
+                                        type="number"
+                                        inputMode="decimal"
+                                        placeholder="0" 
+                                        value={amount} 
+                                        onChange={e => setAmount(e.target.value)}
+                                        className="flex-1 text-4xl font-black text-gray-800 border-b-2 border-gray-200 focus:border-teal-500 outline-none py-2 bg-transparent placeholder-gray-300" 
+                                        autoFocus
+                                    />
+                                    <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-gray-100 rounded-xl px-4 font-bold text-gray-700 border-none outline-none focus:ring-2 focus:ring-teal-500">
+                                        <option value="TWD">TWD</option>
+                                        <option value="USD">USD</option>
+                                        <option value="JPY">JPY</option>
+                                    </select>
                                 </div>
-                            </div>
-
-                            {/* Split Type */}
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 mb-2 uppercase">如何分攤？</label>
-                                <div className="bg-gray-100 p-1 rounded-xl flex mb-4">
-                                    <button onClick={() => setSplitType('EQUAL')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${splitType === 'EQUAL' ? 'bg-white shadow text-teal-700' : 'text-gray-500 hover:bg-gray-200'}`}>均分 (50/50)</button>
-                                    <button onClick={() => setSplitType('CUSTOM')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${splitType === 'CUSTOM' ? 'bg-white shadow text-teal-700' : 'text-gray-500 hover:bg-gray-200'}`}>指定金額</button>
-                                </div>
-
-                                {splitType === 'CUSTOM' && (
-                                    <div className="grid grid-cols-2 gap-4 animate-fade-in">
-                                        <div>
-                                            <label className="text-xs text-gray-500 mb-1 block">{users.H} 應付 ({currency})</label>
-                                            <div className="relative flex items-center gap-2">
-                                                <input 
-                                                    type="number" // 啟用原生數字鍵盤
-                                                    inputMode="decimal"
-                                                    value={customH} 
-                                                    onChange={e => handleCustomHChange(e.target.value)} // 直接綁定 state
-                                                    className="flex-1 border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none" 
-                                                    placeholder="0.00" 
-                                                />
-                                                {/* 程式碼中**已移除**自訂計算機按鈕 */}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-gray-500 mb-1 block">{users.M} 應付 ({currency})</label>
-                                            <div className="relative flex items-center gap-2">
-                                                <input 
-                                                    type="number" // 啟用原生數字鍵盤
-                                                    inputMode="decimal"
-                                                    value={customM} 
-                                                    onChange={e => handleCustomMChange(e.target.value)} // 直接綁定 state
-                                                    className="flex-1 border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none" 
-                                                    placeholder="0.00" 
-                                                />
-                                                {/* 程式碼中**已移除**自訂計算機按鈕 */}
-                                            </div>
-                                        </div>
+                                {currency !== 'TWD' && (
+                                    <div className="mt-3 bg-blue-50 p-3 rounded-lg flex items-center justify-between text-sm text-blue-800 border border-blue-200">
+                                        <span className="flex items-center gap-1">匯率 (1 {currency} = ) <input type="number" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} onBlur={e => setRate(Number(e.target.value) || 1)} className="w-16 border-b border-blue-300 bg-transparent text-center font-bold outline-none"/> TWD</span>
+                                        <span className="font-bold opacity-80">≈ {amount ? formatMoney(totalAmount * rate) : 0} TWD</span>
                                     </div>
                                 )}
                             </div>
 
-                            <button onClick={handleSubmit} className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-black active:scale-[0.98] transition-all mt-4">
+
+                            {/* Payer */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 mb-2 uppercase">誰付的錢？</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setPayer('H')} className={`py-3 rounded-xl font-bold transition-all ${payer === 'H' ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.H}</button>
+                                    <button onClick={() => setPayer('M')} className={`py-3 rounded-xl font-bold transition-all ${payer === 'M' ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.M}</button>
+                                </div>
+                            </div>
+
+                            {/* Split Type (要求3) */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-400 mb-2 uppercase">如何分攤？</label>
+                                <div className="bg-gray-100 p-1 rounded-xl flex mb-4 shadow-inner">
+                                    <button onClick={() => setSplitType('EQUAL')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${splitType === 'EQUAL' ? 'bg-white shadow text-teal-700' : 'text-gray-500 hover:bg-gray-200'}`}>均分 (50/50)</button>
+                                    <button onClick={() => setSplitType('CUSTOM')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${splitType === 'CUSTOM' ? 'bg-white shadow text-teal-700' : 'text-gray-500 hover:bg-gray-200'}`}>指定金額</button>
+                                </div>
+
+                                {(splitType === 'CUSTOM' || splitType === 'EQUAL') && (
+                                    <div className="grid grid-cols-2 gap-4 animate-fade-in">
+                                        <div>
+                                            <label className="text-xs text-gray-500 mb-1 block">{users.H} 應付 ({currency})</label>
+                                            <input 
+                                                type="number"
+                                                inputMode="decimal"
+                                                value={customH} 
+                                                onChange={e => handleCustomChange('H', e.target.value)}
+                                                readOnly={splitType === 'EQUAL'}
+                                                className={`w-full border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none ${splitType === 'EQUAL' ? 'bg-gray-100' : 'bg-white focus:border-teal-500'}`} 
+                                                placeholder="0.00" 
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500 mb-1 block">{users.M} 應付 ({currency})</label>
+                                            <input 
+                                                type="number"
+                                                inputMode="decimal"
+                                                value={customM} 
+                                                onChange={e => handleCustomChange('M', e.target.value)}
+                                                readOnly={splitType === 'EQUAL'}
+                                                className={`w-full border-2 border-gray-200 rounded-xl p-3 mt-1 font-medium outline-none ${splitType === 'EQUAL' ? 'bg-gray-100' : 'bg-white focus:border-teal-500'}`} 
+                                                placeholder="0.00" 
+                                            />
+                                        </div>
+                                        <p className={`col-span-2 text-xs text-center p-2 rounded-lg ${Math.abs((Number(customH||0) + Number(customM||0)) - totalAmount) > 0.01 ? 'bg-rose-50 text-rose-700' : 'bg-teal-50 text-teal-700'}`}>
+                                            分攤總和：{formatMoney(Number(customH||0) + Number(customM||0))} {currency} / 總金額：{formatMoney(totalAmount)} {currency}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button onClick={handleSubmit} className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-black active:scale-[0.98] transition-all mt-6">
                                 確認新增支出
                             </button>
                         </div>
@@ -686,6 +733,7 @@
                 const defaultAmount = Math.abs(balance);
                 const [amount, setAmount] = useState(defaultAmount > 0 ? defaultAmount.toFixed(2) : '');
                 const [currency, setCurrency] = useState('TWD'); 
+                // 預設由欠錢的一方還款
                 const [payer, setPayer] = useState(balance > 0 ? 'M' : 'H');
 
                 const [rate, setRate] = useState(1);
@@ -693,28 +741,31 @@
 
                  // Update rate
                  useEffect(() => {
-                    if (currency === 'TWD') setRate(1);
-                    else if (currency === 'USD') setRate(baseRates.USD);
-                    else if (currency === 'JPY') setRate(baseRates.JPY);
-                     if(rate === 0 || isNaN(rate)) setRate(1);
+                    let newRate = 1;
+                    if (currency === 'USD') newRate = baseRates.USD;
+                    else if (currency === 'JPY') newRate = baseRates.JPY;
+                    setRate(Number(newRate) || 1);
                 }, [currency, baseRates]);
 
                 const handleSettle = async () => {
+                    if (!db || !userId || !isAuthReady) {
+                        return await show('錯誤：資料庫尚未連線或使用者未認證，請稍候再試。');
+                    }
+                    
                     if (settleAmount <= 0) {
                         return await show('還款金額必須大於零');
                     }
 
                      await addTransaction({
                         id: generateId(),
-                        date: new Date().toISOString(),
+                        date: new Date().toISOString(), // 結算使用當前日期
                         type: 'SETTLE',
-                        item: `還款 (${payer === 'H' ? users.H : users.M} -> ${payer === 'H' ? users.M : users.H})`,
+                        item: `${payer === 'H' ? users.H : users.M} 還款給 ${payer === 'H' ? users.M : users.H}`,
                         amount: settleAmount,
                         currency,
                         rate: Number(rate),
                         payer,
                         splitType: 'SETTLE',
-                        customH: 0, customM: 0
                     });
                 };
 
@@ -736,13 +787,12 @@
                                     <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">實際還款金額</label>
                                     <div className="flex gap-3 items-center"> 
                                         <input 
-                                            type="number" // 啟用原生數字鍵盤
+                                            type="number"
                                             inputMode="decimal"
                                             value={amount} 
-                                            onChange={e => setAmount(e.target.value)} // 直接綁定 state
+                                            onChange={e => setAmount(e.target.value)}
                                             className="flex-1 text-3xl font-bold border-b-2 border-gray-200 py-2 outline-none focus:border-teal-500" 
                                         />
-                                        {/* 程式碼中**已移除**自訂計算機按鈕 */}
                                         <select value={currency} onChange={e => setCurrency(e.target.value)} className="bg-gray-100 rounded-lg px-3 font-bold border-none outline-none">
                                             <option value="TWD">TWD</option>
                                             <option value="USD">USD</option>
@@ -750,7 +800,7 @@
                                         </select>
                                     </div>
                                      {currency !== 'TWD' && (
-                                        <div className="mt-2 text-sm text-gray-500 flex items-center gap-2 bg-gray-50 p-2 rounded-lg">
+                                        <div className="mt-2 text-sm text-gray-500 flex items-center gap-2 bg-gray-50 p-2 rounded-lg border border-gray-200">
                                             匯率: <input type="number" inputMode="decimal" value={rate} onChange={e=>setRate(e.target.value)} onBlur={e => setRate(Number(e.target.value) || 1)} className="w-16 border-b text-center font-bold bg-transparent"/>
                                             = {formatMoney(settleAmount*rate)} TWD
                                         </div>
@@ -760,8 +810,8 @@
                                 <div>
                                     <label className="block text-xs font-bold text-gray-400 mb-2 uppercase">誰進行還款？</label>
                                     <div className="grid grid-cols-2 gap-3">
-                                        <button onClick={() => setPayer('H')} className={`py-3 rounded-xl font-medium border-2 transition-all ${payer === 'H' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-md' : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.H}</button>
-                                        <button onClick={() => setPayer('M')} className={`py-3 rounded-xl font-medium border-2 transition-all ${payer === 'M' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-md' : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.M}</button>
+                                        <button onClick={() => setPayer('H')} className={`py-3 rounded-xl font-bold border-2 transition-all ${payer === 'H' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-md' : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.H}</button>
+                                        <button onClick={() => setPayer('M')} className={`py-3 rounded-xl font-bold border-2 transition-all ${payer === 'M' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-md' : 'border-transparent bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{users.M}</button>
                                     </div>
                                 </div>
 
@@ -774,41 +824,48 @@
                 );
             };
 
-            const HistoryView = () => (
-                 <div className="min-h-screen bg-gray-50 animate-fade-in">
-                    <div className="p-4 bg-white border-b flex items-center gap-4 sticky top-0 z-10 shadow-sm">
-                        <button onClick={() => setView('HOME')} className="text-gray-500 p-1 rounded-full hover:bg-gray-100"><Icons.ArrowLeft/></button>
-                        <h2 className="font-bold text-lg">交易紀錄</h2>
-                    </div>
-                    <div className="p-4 space-y-3">
-                        {transactions.map(tx => (
-                             <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-md flex justify-between items-center">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner ${tx.type === 'SETTLE' ? 'bg-green-100 text-green-600' : 'bg-blue-50 text-blue-500'}`}>
-                                        {tx.type === 'SETTLE' ? <Icons.Coins size={18}/> : <Icons.Split size={18}/>}
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-gray-800">{tx.item}</div>
-                                        <div className="text-xs text-gray-400">
-                                            {new Date(tx.date).toLocaleDateString()} • {tx.payer === 'H' ? users.H : users.M} 付款
+            const HistoryView = () => {
+                 // 排序，確保最新紀錄在最上面
+                const sortedTransactions = useMemo(() => {
+                    return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+                }, [transactions]);
+                
+                return (
+                     <div className="min-h-screen bg-gray-50 animate-fade-in">
+                        <div className="p-4 bg-white border-b flex items-center gap-4 sticky top-0 z-10 shadow-sm">
+                            <button onClick={() => setView('HOME')} className="text-gray-500 p-1 rounded-full hover:bg-gray-100"><Icons.ArrowLeft/></button>
+                            <h2 className="font-bold text-lg">交易紀錄</h2>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            {sortedTransactions.map(tx => (
+                                 <div key={tx.id} className="bg-white p-4 rounded-2xl shadow-md flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg shadow-inner ${tx.type === 'SETTLE' ? 'bg-green-100 text-green-600' : 'bg-blue-50 text-blue-500'}`}>
+                                            {tx.type === 'SETTLE' ? <Icons.Coins size={18}/> : <Icons.Split size={18}/>}
+                                        </div>
+                                        <div>
+                                            <div className="font-bold text-gray-800">{tx.item}</div>
+                                            <div className="text-xs text-gray-400">
+                                                {new Date(tx.date).toLocaleDateString('zh-TW')} • {tx.payer === 'H' ? users.H : users.M} 付款
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <div className="text-right">
-                                        <div className="font-bold text-gray-800">{formatMoney(tx.amount)} {tx.currency}</div>
-                                        {tx.currency !== 'TWD' && <div className="text-xs text-gray-400">({formatMoney(tx.amount * tx.rate)} TWD)</div>}
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right">
+                                            <div className="font-bold text-gray-800">{formatMoney(tx.amount)} {tx.currency}</div>
+                                            {tx.currency !== 'TWD' && <div className="text-xs text-gray-400">({formatMoney(tx.amount * tx.rate)} TWD)</div>}
+                                        </div>
+                                        <button onClick={() => deleteTransaction(tx.id)} className="text-gray-300 p-1 rounded-full hover:text-rose-500 hover:bg-rose-50 transition-colors">
+                                            <Icons.Trash2 size={18} />
+                                        </button>
                                     </div>
-                                    <button onClick={() => deleteTransaction(tx.id)} className="text-gray-300 p-1 rounded-full hover:text-rose-500 hover:bg-rose-50 transition-colors">
-                                        <Icons.Trash2 size={18} />
-                                    </button>
                                 </div>
-                            </div>
-                        ))}
-                        {transactions.length === 0 && <div className="text-center text-gray-400 mt-10 p-8 bg-white rounded-xl shadow-inner">尚無紀錄</div>}
+                            ))}
+                            {sortedTransactions.length === 0 && <div className="text-center text-gray-400 mt-10 p-8 bg-white rounded-xl shadow-inner border border-dashed">尚無紀錄</div>}
+                        </div>
                     </div>
-                </div>
-            );
+                );
+            };
 
             const SettingsView = () => (
                 <div className="min-h-screen bg-white animate-fade-in">
@@ -818,7 +875,7 @@
                     </div>
                     <div className="p-6 space-y-8">
                         <div>
-                            <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">使用者名稱</h3>
+                            <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">使用者名稱設定</h3>
                             <div className="space-y-4">
                                 <div>
                                     <label className="text-xs text-gray-500 mb-1 block">H 方代稱</label>
@@ -839,7 +896,8 @@
                                     {rateLoading ? '更新中...' : '更新匯率'}
                                 </button>
                             </div>
-                            <div className="space-y-4">
+                            <div className="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                {/* USD Rate */}
                                 <div className="flex justify-between items-center border-b pb-2">
                                     <span className="font-medium text-gray-700">USD</span>
                                     <div className="flex items-center gap-2">
@@ -850,12 +908,13 @@
                                             value={baseRates.USD} 
                                             onChange={e => setBaseRates({...baseRates, USD: parseFloat(e.target.value)})} 
                                             onBlur={e => saveBaseRates({...baseRates, USD: Number(e.target.value) || 1})}
-                                            className="w-20 text-right font-bold outline-none" 
+                                            className="w-20 text-right font-bold outline-none bg-transparent" 
                                         />
                                         <span className="text-xs text-gray-400">TWD</span>
                                     </div>
                                 </div>
-                                <div className="flex justify-between items-center border-b pb-2">
+                                {/* JPY Rate */}
+                                <div className="flex justify-between items-center pb-2">
                                     <span className="font-medium text-gray-700">JPY</span>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs text-gray-400">1 JPY =</span>
@@ -865,7 +924,7 @@
                                             value={baseRates.JPY} 
                                             onChange={e => setBaseRates({...baseRates, JPY: parseFloat(e.target.value)})} 
                                             onBlur={e => saveBaseRates({...baseRates, JPY: Number(e.target.value) || 1})}
-                                            className="w-20 text-right font-bold outline-none" 
+                                            className="w-20 text-right font-bold outline-none bg-transparent" 
                                         />
                                         <span className="text-xs text-gray-400">TWD</span>
                                     </div>
@@ -874,11 +933,7 @@
                         </div>
 
                          <div className="pt-8 border-t">
-                            <button onClick={() => { show('確定要清除所有資料嗎？此動作無法復原。', true).then(confirmed => {
-                                if (confirmed) {
-                                    clearAllData();
-                                }
-                            }); }} className="w-full py-3 text-rose-500 font-medium bg-rose-50 rounded-xl hover:bg-rose-100 transition-colors">
+                            <button onClick={clearAllData} className="w-full py-3 text-rose-600 font-bold bg-rose-50 rounded-xl hover:bg-rose-100 transition-colors shadow-md">
                                 清除所有資料
                             </button>
                         </div>
@@ -889,11 +944,11 @@
             // Render based on current view
             const renderView = () => {
                 switch (view) {
-                    case 'HOME': return <HomeView />;
                     case 'ADD': return <AddView />;
                     case 'SETTLE': return <SettleView />;
                     case 'HISTORY': return <HistoryView />;
                     case 'SETTINGS': return <SettingsView />;
+                    case 'HOME':
                     default: return <HomeView />;
                 }
             };
@@ -903,13 +958,12 @@
                 <div className="app-container font-sans text-gray-900">
                     <Modal />
                     {toast.visible && (
-                        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-xl shadow-lg z-[10000] animate-fade-in">
+                        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-xl shadow-xl z-[10000] animate-fade-in font-medium">
                             {toast.message}
                         </div>
                     )}
                     
                     {renderView()}
-                    {/* CalculatorModal 組件已從這個檔案中移除 */}
                 </div>
             );
         };
