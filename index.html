@@ -60,8 +60,8 @@
                     <option value="partner_pays">夥伴負擔</option>
                 </select>
                 
-                <button type="submit" 
-                        class="col-span-1 md:col-span-3 bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-150 font-semibold shadow-md">
+                <button type="submit" id="submit-button"
+                        class="col-span-1 md:col-span-3 bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-150 font-semibold shadow-md disabled:bg-indigo-300">
                     新增費用
                 </button>
             </form>
@@ -117,14 +117,14 @@
 
     <!-- Main Application Logic (All in one module script) -->
     <script type="module">
-        // 🚨 修正：將所有邏輯移動到單一的 type="module" 區塊，直接使用匯入的函式。
+        // 匯入 Firebase 模組
         import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, addDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // 全域變數
-        let db;
-        let auth;
+        let db = null;
+        let auth = null;
         let userId = 'loading';
         let authReady = false;
 
@@ -140,22 +140,20 @@
             };
         }
 
-        // 函式：計算並更新結算總結
+        // 函式：計算並更新結算總結 (與之前相同)
         function updateSettlement(expenses) {
-            let userPaidTotal = 0; // 我 (當前用戶) 實際支付總額
-            let partnerPaidTotal = 0; // 夥伴實際支付總額
-            let userOwed = 0; // 我應該負擔的金額
-            let partnerOwed = 0; // 夥伴應該負擔的金額
+            let userPaidTotal = 0;
+            let partnerPaidTotal = 0;
+            let userOwed = 0;
+            let partnerOwed = 0;
 
             expenses.forEach(exp => {
-                // 1. 計算誰支付了
                 if (exp.paidBy === 'user') {
                     userPaidTotal += exp.amount;
                 } else if (exp.paidBy === 'partner') {
                     partnerPaidTotal += exp.amount;
                 }
 
-                // 2. 計算誰負擔了多少 (根據 splitType)
                 if (exp.splitType === 'equal') {
                     const half = exp.amount / 2;
                     userOwed += half;
@@ -167,36 +165,29 @@
                 }
             });
 
-            // 總支出
             const totalSpent = userPaidTotal + partnerPaidTotal;
             document.getElementById('total-spent').textContent = `${totalSpent.toFixed(2)} TWD`;
 
-            // 結算計算：(我實際支付 - 我應該負擔)
-            // 正數: 夥伴欠我 (我多付了)
-            // 負數: 我欠夥伴 (我少付了)
             const netBalance = userPaidTotal - userOwed;
             const summaryEl = document.getElementById('settlement-summary');
             const labelEl = document.getElementById('settlement-label');
             const amountEl = document.getElementById('settlement-amount');
 
-            summaryEl.className = summaryEl.className.replace(/bg-\w+-100|bg-\w+-50|border-green-600|border-red-600/g, '');
+            summaryEl.className = summaryEl.className.replace(/bg-\w+-100|bg-\w+-50|border-green-600|border-red-600|bg-gray-100/g, '');
 
             if (netBalance > 0.01) {
-                // 夥伴欠我
                 labelEl.textContent = '夥伴應付我 (多付了)';
                 amountEl.textContent = `${Math.abs(netBalance).toFixed(2)} TWD`;
                 summaryEl.classList.add('bg-green-100', 'border-l-4', 'border-green-600');
                 amountEl.classList.add('text-green-800');
                 amountEl.classList.remove('text-red-800', 'text-gray-800');
             } else if (netBalance < -0.01) {
-                // 我欠夥伴
                 labelEl.textContent = '我應付夥伴 (少付了)';
                 amountEl.textContent = `${Math.abs(netBalance).toFixed(2)} TWD`;
                 summaryEl.classList.add('bg-red-100', 'border-l-4', 'border-red-600');
                 amountEl.classList.add('text-red-800');
                 amountEl.classList.remove('text-green-800', 'text-gray-800');
             } else {
-                // 平衡
                 labelEl.textContent = '結算結果';
                 amountEl.textContent = '已結清 (0.00 TWD)';
                 summaryEl.classList.add('bg-gray-100');
@@ -207,16 +198,14 @@
 
         // 函式：刪除費用
         async function deleteExpense(docId) {
-            if (!authReady) {
-                showMessage("錯誤", "應用程式尚未準備好，請稍候再試。");
+            if (!authReady || !db) {
+                showMessage("錯誤", "資料庫連線離線或尚未準備好。");
                 return;
             }
             try {
-                // 使用公共路徑
                 const docRef = doc(db, 
                     `artifacts/${__app_id}/public/data/expenses`, docId);
                 await deleteDoc(docRef);
-                // onSnapshot 會自動更新列表
             } catch (error) {
                 console.error("刪除費用失敗: ", error);
                 showMessage("錯誤", "刪除資料失敗，請檢查權限或連線。");
@@ -224,10 +213,10 @@
         }
 
 
-        // 函式：渲染費用列表
+        // 函式：渲染費用列表 (與之前相同)
         function renderExpenseList(expenses) {
             const listEl = document.getElementById('expense-list');
-            listEl.innerHTML = ''; // 清空列表
+            listEl.innerHTML = '';
 
             if (expenses.length === 0) {
                 listEl.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-gray-500">目前沒有費用記錄。</td></tr>`;
@@ -238,7 +227,6 @@
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-gray-50';
                 
-                // 根據 splitType 計算分攤金額
                 let userSplit = 0;
                 let partnerSplit = 0;
 
@@ -273,7 +261,6 @@
                 listEl.appendChild(tr);
             });
 
-            // 設置刪除按鈕的事件監聽器
             listEl.querySelectorAll('.delete-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const docId = e.target.getAttribute('data-id');
@@ -284,20 +271,19 @@
 
         // 函式：訂閱並即時載入資料
         function loadData() {
-            // 🚨 這是關鍵步驟：確保 authReady 為 true 且 userId 存在
-            if (!authReady || userId === 'loading') {
+            if (!authReady || userId === 'loading' || !db) {
                 document.getElementById('loading-message').textContent = '等待身份驗證完成...';
                 return;
             }
 
             document.getElementById('loading-message').classList.add('hidden');
-            document.getElementById('auth-status').textContent = '連線成功 (即時)';
-            document.getElementById('auth-status').classList.remove('text-yellow-600', 'text-red-600');
-            document.getElementById('auth-status').classList.add('text-green-600');
+            const authStatusEl = document.getElementById('auth-status');
+            authStatusEl.textContent = '連線成功 (即時)';
+            authStatusEl.classList.remove('text-yellow-600', 'text-red-600', 'text-orange-500');
+            authStatusEl.classList.add('text-green-600');
             
             const collectionPath = `artifacts/${__app_id}/public/data/expenses`;
             
-            // 使用 onSnapshot 訂閱資料，確保即時更新
             const unsubscribe = onSnapshot(
                 collection(db, collectionPath),
                 (snapshot) => {
@@ -306,7 +292,6 @@
                         expenses.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    // 根據日期排序 (最新的在前面)
                     expenses.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); 
                     
                     renderExpenseList(expenses);
@@ -314,14 +299,13 @@
                 },
                 (error) => {
                     console.error("Firestore 即時監聽失敗 (錯誤可能來自權限): ", error);
-                    document.getElementById('auth-status').textContent = '連線錯誤 (請檢查控制台)';
-                    document.getElementById('auth-status').classList.remove('text-green-600');
-                    document.getElementById('auth-status').classList.add('text-red-600');
-                    showMessage("連線錯誤", "資料載入失敗，可能是安全權限問題。請查看控制台 (Console) 了解詳細錯誤。");
+                    authStatusEl.textContent = '連線錯誤 (請檢查控制台)';
+                    authStatusEl.classList.remove('text-green-600');
+                    authStatusEl.classList.add('text-red-600');
+                    showMessage("連線錯誤", "資料載入失敗，請查看控制台 (Console) 了解詳細錯誤。");
                 }
             );
 
-            // 讓 loadData 傳回一個函式，以便在需要時停止監聽 (非必要)
             return unsubscribe;
         }
 
@@ -329,8 +313,8 @@
         async function addExpense(e) {
             e.preventDefault();
 
-            if (!authReady) {
-                showMessage("錯誤", "應用程式尚未準備好，請稍候再試。");
+            if (!authReady || !db) {
+                showMessage("錯誤", "資料庫連線離線或尚未準備好，請稍候再試。");
                 return;
             }
 
@@ -350,19 +334,16 @@
                 amount,
                 paidBy,
                 splitType,
-                createdAt: Date.now(), // 用於排序
-                // 記錄是哪個用戶新增的
+                createdAt: Date.now(),
                 createdBy: userId, 
             };
 
             try {
-                // 使用公共路徑
                 const collectionPath = `artifacts/${__app_id}/public/data/expenses`;
                 await addDoc(collection(db, collectionPath), newExpense);
 
-                // 清空表單
                 form.reset();
-                form['paid-by'].value = ""; // 重設下拉選單
+                form['paid-by'].value = "";
             } catch (error) {
                 console.error("新增費用失敗: ", error);
                 showMessage("錯誤", "新增資料失敗，請檢查權限或連線。");
@@ -371,44 +352,63 @@
 
         // 啟動應用程式的主函式
         function initApp() {
+            const authStatusEl = document.getElementById('auth-status');
+            const currentUserIdEl = document.getElementById('current-user-id');
+            const submitButton = document.getElementById('submit-button');
+            const loadingMessageEl = document.getElementById('loading-message');
+            
+            // 🚨 修正：檢查 Canvas 環境變數是否存在
+            const hasCanvasEnvironment = typeof window.__firebase_config !== 'undefined' && typeof window.__app_id !== 'undefined';
+
+            if (!hasCanvasEnvironment) {
+                // 外部環境 (例如 GitHub Pages) 模式：禁用 Firebase 相關功能
+                authStatusEl.textContent = '外部環境模式 (Firestore 離線)';
+                authStatusEl.classList.remove('text-yellow-600');
+                authStatusEl.classList.add('text-orange-500');
+                currentUserIdEl.textContent = 'N/A (請在 Canvas 中預覽)';
+                loadingMessageEl.textContent = '資料庫功能已禁用，請回到 Canvas 預覽中測試資料庫連線。';
+                submitButton.disabled = true;
+                submitButton.textContent = '新增費用 (離線)';
+                
+                // 立即顯示警告 modal，只有第一次
+                setTimeout(() => {
+                    if (document.getElementById('message-modal').classList.contains('hidden')) {
+                        showMessage(
+                            "連線警告 - 外部環境",
+                            "您正在 Canvas 外部執行此應用程式。Firebase 連線配置遺失，因此資料庫功能已禁用。請回到 Canvas 預覽中測試連線。"
+                        );
+                    }
+                }, 500);
+
+                // 阻止應用程式繼續初始化 Firebase
+                return;
+            }
+
+
+            // 正常的 Canvas 環境初始化流程
             try {
-                // 1. 初始化 Firebase 服務
                 setLogLevel('debug'); 
 
-                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const firebaseConfig = JSON.parse(__firebase_config);
                 const app = initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
                 
-                const currentUserIdEl = document.getElementById('current-user-id');
-                const authStatusEl = document.getElementById('auth-status');
-
-                // 2. 處理身份驗證
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-                // 使用 onAuthStateChanged 監聽並等待驗證完成
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
-                        // 成功登入
                         userId = user.uid;
                         authReady = true;
                         currentUserIdEl.textContent = userId;
-                        authStatusEl.textContent = '已驗證 (可存取)';
-                        authStatusEl.classList.remove('text-yellow-600', 'text-red-600');
-                        authStatusEl.classList.add('text-green-600');
-                        
-                        // 🚨 登入成功後才執行資料載入
-                        loadData();
+                        loadData(); // 登入成功後才開始載入資料
 
                     } else {
-                        // 未登入/登出 (這會在初始時發生)
-                        // 嘗試使用提供的 Token 登入或匿名登入
+                        // 初始登入嘗試
                         if (initialAuthToken) {
-                            // 使用平台提供的自訂 Token 登入
                             signInWithCustomToken(auth, initialAuthToken)
                                 .catch(error => {
                                     console.error("Custom Token 登入失敗, 轉為匿名登入:", error);
-                                    // 如果 Custom Token 失敗，使用匿名登入作為備用
                                     signInAnonymously(auth).catch(anonError => {
                                         console.error("匿名登入也失敗:", anonError);
                                         authStatusEl.textContent = '連線失敗 (登入)';
@@ -416,7 +416,6 @@
                                     });
                                 });
                         } else {
-                            // 沒有 Token，直接匿名登入
                              signInAnonymously(auth).catch(error => {
                                 console.error("匿名登入失敗:", error);
                                 authStatusEl.textContent = '連線失敗 (匿名登入)';
@@ -426,19 +425,17 @@
                     }
                 });
 
-                // 3. 綁定表單提交事件
                 document.getElementById('expense-form').addEventListener('submit', addExpense);
 
             } catch (error) {
                 console.error("應用程式初始化失敗:", error);
-                document.getElementById('auth-status').textContent = '初始化錯誤';
-                document.getElementById('auth-status').classList.remove('text-yellow-600');
-                document.getElementById('auth-status').classList.add('text-red-600');
+                authStatusEl.textContent = '初始化錯誤';
+                authStatusEl.classList.remove('text-yellow-600');
+                authStatusEl.classList.add('text-red-600');
                 showMessage("嚴重錯誤", "應用程式初始化失敗，請檢查控制台的錯誤訊息。");
             }
         }
 
-        // 啟動應用程式的主函式
         window.onload = initApp;
 
     </script>
