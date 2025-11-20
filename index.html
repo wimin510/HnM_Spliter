@@ -41,6 +41,9 @@
         <h1 class="text-3xl font-bold text-center text-gray-800">無賴帳本 📝</h1>
         <p class="text-center text-sm text-gray-500 font-mono" id="user-info"></p>
         
+        <!-- 新增連線狀態顯示 -->
+        <p class="text-center text-xs font-semibold" id="connection-status">連線中...</p>
+        
         <!-- 欠款狀態顯示 -->
         <div id="balance-card" class="p-6 rounded-xl shadow-lg transition-all duration-300">
             <h2 class="text-lg font-semibold mb-2 text-white" id="balance-status-text">載入中...</h2>
@@ -213,6 +216,8 @@
         const balanceAmountElement = document.getElementById('balance-amount');
         const userInfoElement = document.getElementById('user-info');
         const errorMessageElement = document.getElementById('error-message');
+        // 新增 DOM 元素
+        const connectionStatusElement = document.getElementById('connection-status');
         
         // 名稱設定 DOM
         const hNameInput = document.getElementById('h-name-input');
@@ -232,23 +237,67 @@
             document.getElementById('modal-message').textContent = message;
             document.getElementById('modal-container').classList.remove('hidden');
         };
+        
+        // 更新連線狀態顯示
+        const setConnectionStatus = (status, message = '') => {
+            const statusMap = {
+                'connecting': { text: '連線中...', color: 'text-gray-500' },
+                'connected': { text: '連線成功 (已登入)', color: 'text-secondary' },
+                'error': { text: message || '連線失敗', color: 'text-danger' },
+            };
+
+            const display = statusMap[status] || statusMap['error'];
+            connectionStatusElement.textContent = display.text;
+            connectionStatusElement.className = `text-center text-xs font-semibold ${display.color}`;
+        };
+
 
         // 處理 Firebase 錯誤
         const handleFirebaseError = (error, action = '操作') => {
             console.error(`Firebase 錯誤 [${action}]:`, error);
             const msg = `[${action}失敗] 請檢查網路連線或稍後再試。`;
             showModal(msg);
+            // 不在這裡直接設置 'error' 狀態，讓認證流程結束後統一處理
         };
 
         // 初始化 Firebase
         try {
+            // 初始狀態：連線中
+            setConnectionStatus('connecting'); 
+            
             // 從全域變數獲取配置
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'hnm-spliter-default';
-            const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+            
+            // --- 修正: 應用程式配置缺失問題 ---
+            // 提供一個預設的模擬配置，以防止在沒有環境變數時報錯，並使用上傳圖片中的模擬金鑰
+            let firebaseConfig = {
+                apiKey: "AIzaSyCRHx0i02nojkN5-y5HxS3P3i1ja5SEy8E", 
+                authDomain: "hnm-spliter.firebaseapp.com",
+                projectId: "hnm-spliter",
+                storageBucket: "hnm-spliter.firebasestorage.app",
+                messagingSenderId: "514297368344",
+                appId: "1:514297368344:web:a9ee0cb370cddc1b6e986d",
+                measurementId: "G-4DY12810X8"
+            };
 
-            if (Object.keys(firebaseConfig).length === 0) {
+            // 檢查是否有 Canvas 提供的真實配置 (__firebase_config)，如果有則覆蓋模擬配置
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                try {
+                    const envConfig = JSON.parse(__firebase_config);
+                    // 確保配置物件非空且有 apiKey
+                    if (envConfig && Object.keys(envConfig).length > 0 && envConfig.apiKey) {
+                        firebaseConfig = envConfig;
+                    }
+                } catch (e) {
+                    console.error("解析環境變數 __firebase_config 失敗:", e);
+                }
+            }
+            // --- 修正結束 ---
+
+            if (!firebaseConfig.apiKey) { // 最終檢查配置是否有效
                 console.error('Firebase 配置缺失！無法初始化應用程式。');
                 showModal('應用程式配置缺失，無法連接至資料庫。');
+                setConnectionStatus('error', '配置缺失'); // 設置錯誤狀態
             } else {
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -260,6 +309,7 @@
                         userId = user.uid;
                         userInfoElement.textContent = `User ID: ${userId}`;
                         isAuthReady = true;
+                        setConnectionStatus('connected'); // 設置成功狀態
                         // 身份驗證完成後，啟動資料監聽
                         setupDataListeners();
                     } else {
@@ -269,10 +319,16 @@
                         if (customToken) {
                             signInWithCustomToken(auth, customToken).catch(err => {
                                 handleFirebaseError(err, '自定義登入');
-                                signInAnonymously(auth).catch(err => handleFirebaseError(err, '匿名登入'));
+                                signInAnonymously(auth).catch(err => {
+                                    handleFirebaseError(err, '匿名登入');
+                                    setConnectionStatus('error', '認證失敗'); // 最終認證失敗
+                                });
                             });
                         } else {
-                            signInAnonymously(auth).catch(err => handleFirebaseError(err, '匿名登入'));
+                            signInAnonymously(auth).catch(err => {
+                                handleFirebaseError(err, '匿名登入');
+                                setConnectionStatus('error', '認證失敗'); // 最終認證失敗
+                            });
                         }
                     }
                 });
@@ -280,6 +336,7 @@
 
         } catch (error) {
             handleFirebaseError(error, '初始化');
+            setConnectionStatus('error', '初始化失敗');
         }
 
         // --- 資料庫路徑 ---
@@ -377,6 +434,15 @@
             // 3. 更新自訂金額的標籤
             document.querySelector('label[for="amountH"]').textContent = `${PARTY_NAMES['H']} 應付金額`;
             document.querySelector('label[for="amountM"]').textContent = `${PARTY_NAMES['M']} 應付金額`;
+            
+            // 由於名稱改變，需要重新渲染欠款狀態和最近紀錄來更新顯示的名稱
+            // 這裡可以手動調用一次渲染，但由於 onSnapshot 會觸發，通常不需要手動調用，除非初始化時
+            // if (isAuthReady) {
+            //     // 理想情況下，onSnapshot 會自動處理，但這裡我們確保 UI 立即更新
+            //     // 由於沒有拿到最新的 balance 和 records 數據，這裡只能依賴 onSnapshot 的回調
+            //     // 重要的是確保 updatePartyNamesUI 在 onSnapshot 的回調中被調用，或在初始化時被調用。
+            // }
+
         };
 
 
@@ -619,12 +685,14 @@
                 
                 // 2. 更新總欠款 (原子操作)
                 const balanceDocRef = getBalanceDocRef();
-                const balanceSnapshot = await getDocs(query(collection(db, `artifacts/${appId}/public/data/balances`)));
+                // 由於 Firestore 的限制，我們不再使用 getDocs 查詢 collection，而是直接使用 doc 引用
+                
+                // 獲取當前的 balance (為了避免 race condition，這裡的讀取/寫入最好在後端處理，但前端只能近似處理)
+                const balanceDocSnapshot = await getDoc(balanceDocRef);
                 let currentBalance = 0;
 
-                if (!balanceSnapshot.empty) {
-                    const doc = balanceSnapshot.docs[0];
-                    currentBalance = doc.data().balance || 0;
+                if (balanceDocSnapshot.exists()) {
+                    currentBalance = balanceDocSnapshot.data().balance || 0;
                 }
                 
                 const newBalance = currentBalance + netDebtChange;
