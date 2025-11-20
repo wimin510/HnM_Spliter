@@ -3,13 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HnM Split | 無賴帳本</title>
+    <title>HnM Split | 無賴帳本 (Firestore)</title>
     <!-- React, ReactDOM, Babel for running JSX in browser -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK Imports (Module style) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+
+        // Expose Firebase modules globally for the Babel script to access
+        window.FirebaseServices = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs, setLogLevel };
+    </script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -39,7 +49,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
         
         // --- Icons Components (Lucide) ---
         const Icons = {
@@ -53,6 +63,7 @@
             Split: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>,
             Coins: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m7.1 10.28 1.4-1.428m-1.428 0 1.428 1.428"/></svg>,
             Delete: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M10 12v4"/><path d="M14 12v4"/><path d="M21 6v14c0 1-1 2-2 2H5c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>,
+            Loader: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
         };
 
         // --- Utils ---
@@ -104,7 +115,7 @@
             return { Modal, show };
         };
 
-        // --- Calculator Component ---
+        // --- Calculator Component (Unchanged) ---
         const CalculatorModal = ({ initialValue, onClose, onOk, showToast }) => {
             const [display, setDisplay] = useState(initialValue || '0');
             const [expression, setExpression] = useState(initialValue || '0');
@@ -127,8 +138,13 @@
                 } else {
                     // Append to current expression
                     const newDisplay = (display === '0' && value !== '.') ? value : display + value;
-                    const newExpression = expression + value;
+                    let newExpression = expression + value;
                     
+                    // Simple logic to prevent leading zero issue on display
+                    if (display === '0' && value !== '.') {
+                         newExpression = expression.slice(0, expression.length - 1) + value; // Replace the 0
+                    }
+
                     setDisplay(newDisplay);
                     setExpression(newExpression);
                 }
@@ -137,10 +153,10 @@
             const handleOperator = (op) => {
                 const lastChar = expression.slice(-1);
                 
-                if (op === '-' && lastChar !== '(' && expression !== '0') {
-                    // Special case: allow negative sign after an operator or at start, but handle display correctly
+                if (op === '-' && ('+-/*('.includes(lastChar) || expression === '0')) {
+                    // Allow negative sign after an operator or at start
                     setExpression(expression + op);
-                    setDisplay('');
+                    setDisplay(op); // Display just the operator for context
                     setIsResult(false);
                     return;
                 }
@@ -152,7 +168,6 @@
                 } else if (expression !== '' && !isResult) {
                     // Calculate intermediate result and append operator
                     try {
-                        // Use a safe calculation function (or Math.round for display logic)
                         let currentResult = String(eval(expression));
                         setExpression(currentResult + op);
                         setDisplay('');
@@ -183,7 +198,6 @@
                     setIsResult(true);
                 } else {
                     // Update display to show the last number/segment
-                    // This regex tries to find the last sequence of digits/dot (the number being typed)
                     const match = newExpression.match(/(\d+\.?\d*)$/);
                     setDisplay(match ? match[1] : '');
                 }
@@ -191,13 +205,10 @@
 
             const handleCalculate = () => {
                 try {
-                    // Sanitize expression (only allow digits, dot, and basic operators)
                     const safeExpression = expression.replace(/[^-()\d/*+.]/g, '');
                     if (!safeExpression) return;
                     
                     let result = eval(safeExpression);
-                    
-                    // Round to prevent floating point issues, limit to 4 decimal places for intermediate display
                     result = Math.round(result * 10000) / 10000; 
 
                     setExpression(String(result));
@@ -217,10 +228,8 @@
             const handleOk = () => {
                 let finalResult = handleCalculate();
                 if (typeof finalResult === 'number' && !isNaN(finalResult)) {
-                    // Passing the result as a string rounded to 2 decimal places back to the main app
                     onOk(finalResult.toFixed(2));
                 } else {
-                    // If calculation failed, just close the calculator
                     onClose();
                 }
             };
@@ -235,7 +244,6 @@
             );
 
             return (
-                // 調整：固定在底部，高度約佔 65vh，並限制在 480px 寬度內
                 <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-[480px] h-[65vh] bg-white z-[9999] flex flex-col justify-end animate-fade-in p-4 rounded-t-3xl shadow-[0_-10px_30px_rgba(0,0,0,0.1)]">
                     {/* Display */}
                     <div className="flex-grow flex flex-col justify-end p-4 mb-4 rounded-xl bg-gray-50 shadow-inner">
@@ -247,7 +255,7 @@
                         </div>
                     </div>
 
-                    {/* Buttons: Changed to use grid rows/cols for layout control */}
+                    {/* Buttons */}
                     <div className="grid grid-cols-4 grid-rows-5 gap-3 mb-4 h-full max-h-[60%]">
                         {/* Row 1 */}
                         <Button onClick={handleClear} className="bg-rose-100 hover:bg-rose-200 text-rose-600">C</Button>
@@ -277,8 +285,6 @@
                         <Button onClick={() => handleInput('0')} col-span-2>0</Button>
                         <Button onClick={() => handleInput('.')} className="bg-gray-200 hover:bg-gray-300 text-gray-800">.</Button>
                         <Button onClick={handleCalculate} className="bg-gray-200 hover:bg-gray-300 text-gray-800">=</Button>
-                        {/* Note: The OK button spans rows 4 and 5 */}
-
                     </div>
                     {/* Close button for safety */}
                     <button onClick={onClose} className="w-full text-center text-sm text-gray-500 py-1 hover:text-gray-700">關閉</button>
@@ -289,22 +295,144 @@
 
         // --- Main App ---
         const App = () => {
+            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, deleteDoc, updateDoc, writeBatch, query, getDocs, setLogLevel } = window.FirebaseServices || {};
+
             const { Modal, show } = useModal();
             
-            // State
-            const [view, setView] = useState('HOME'); // HOME, ADD, SETTLE, HISTORY, SETTINGS
-            const [users, setUsers] = useState({ H: 'H 方', M: 'M 方' });
+            // Firebase State
+            const [db, setDb] = useState(null);
+            const [auth, setAuth] = useState(null);
+            const [userId, setUserId] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [dataLoading, setDataLoading] = useState(true);
+
+            // Data State (Initial/Default values)
+            const DEFAULT_USERS = { H: 'H 方', M: 'M 方' };
+            const DEFAULT_RATES = { USD: 32.5, JPY: 0.21 };
+            
+            const [users, setUsers] = useState(DEFAULT_USERS);
             const [transactions, setTransactions] = useState([]);
-            const [baseRates, setBaseRates] = useState({ USD: 32.5, JPY: 0.21 }); // Default fallback rates
+            const [baseRates, setBaseRates] = useState(DEFAULT_RATES);
             const [rateLoading, setRateLoading] = useState(false);
 
             // Calculator State
+            const [view, setView] = useState('HOME'); // HOME, ADD, SETTLE, HISTORY, SETTINGS
             const [isCalcOpen, setIsCalcOpen] = useState(false);
             const [calcTarget, setCalcTarget] = useState({ setter: null, initialValue: '' });
-            const focusElementRef = useRef(null); // Reference to track which field opened the calc
+            const focusElementRef = useRef(null); 
 
             // Toast state (for calc errors)
             const [toast, setToast] = useState({ message: '', visible: false });
+
+            // --- Firebase Setup ---
+            useEffect(() => {
+                if (!initializeApp) {
+                    showToast("錯誤：Firebase 服務無法加載。請檢查連線。");
+                    setIsAuthReady(true);
+                    setDataLoading(false);
+                    return;
+                }
+                
+                // setLogLevel('debug'); // For debugging
+
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                    
+                    const app = initializeApp(firebaseConfig);
+                    const firestore = getFirestore(app);
+                    const authInstance = getAuth(app);
+                    
+                    setDb(firestore);
+                    setAuth(authInstance);
+
+                    const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+                        if (user) {
+                            setUserId(user.uid);
+                            setIsAuthReady(true);
+                        } else {
+                            try {
+                                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                    await signInWithCustomToken(authInstance, __initial_auth_token);
+                                } else {
+                                    await signInAnonymously(authInstance);
+                                }
+                                // onAuthStateChanged will be called again with the signed-in user
+                            } catch (error) {
+                                console.error("Firebase Auth Error:", error);
+                                setUserId(crypto.randomUUID()); // Fallback non-authenticated ID
+                                setIsAuthReady(true);
+                                show("身份驗證失敗，請檢查網路連線。", false);
+                            }
+                        }
+                    });
+
+                    return () => unsubscribe();
+                } catch (error) {
+                    console.error("Firebase Initialization Error:", error);
+                    setIsAuthReady(true);
+                    setDataLoading(false);
+                }
+            }, []);
+
+            // --- Firestore Data Listener ---
+            useEffect(() => {
+                if (!isAuthReady || !db || !userId) return;
+
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const docRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'hnm_split_config');
+
+                // Real-time listener for the configuration document
+                const unsubscribe = onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        setUsers(data.users || DEFAULT_USERS);
+                        setTransactions(data.transactions || []);
+                        setBaseRates(data.baseRates || DEFAULT_RATES);
+                    } else {
+                        // Document doesn't exist, set initial data
+                        const initialData = { 
+                            users: DEFAULT_USERS, 
+                            transactions: [], 
+                            baseRates: DEFAULT_RATES
+                        };
+                        setDoc(docRef, initialData).catch(e => console.error("Error setting initial doc:", e));
+                    }
+                    setDataLoading(false);
+                }, (error) => {
+                    console.error("Firestore Snapshot Error:", error);
+                    setDataLoading(false);
+                    show("資料同步錯誤，請檢查網路連線。", false);
+                });
+
+                // Fetch rates once after auth is ready
+                fetchRates(baseRates);
+
+                return () => unsubscribe();
+            }, [isAuthReady, db, userId]);
+            
+            // --- Firestore Write Operations ---
+            const getDataDocRef = useCallback(() => {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                return doc(db, 'artifacts', appId, 'users', userId, 'data', 'hnm_split_config');
+            }, [db, userId]);
+
+
+            const updateFirestoreData = useCallback(async (updates) => {
+                if (!db || !userId) {
+                    show("資料庫未準備好，請稍候再試。", false);
+                    return;
+                }
+                const docRef = getDataDocRef();
+                try {
+                    await updateDoc(docRef, updates);
+                } catch (e) {
+                    console.error("Error updating Firestore:", e);
+                    show("資料更新失敗！請檢查網路連線。", false);
+                }
+            }, [db, userId, getDataDocRef]);
+
+            // --- Business Logic Functions ---
 
             const showToast = (message) => {
                 setToast({ message, visible: true });
@@ -312,7 +440,6 @@
             };
 
             const openCalculator = (setter, initialValue, event) => {
-                // Prevent input field from losing focus immediately if it has one
                 if(event && event.currentTarget) {
                     focusElementRef.current = event.currentTarget;
                 }
@@ -320,67 +447,75 @@
                 setIsCalcOpen(true);
             };
 
-            // Effect to restore focus after calculator closes
-            useEffect(() => {
-                if (!isCalcOpen && focusElementRef.current) {
-                    // Simple focus restore might not work perfectly due to the way React/DOM handles focus.
-                    // For readOnly input fields, this is less critical.
-                    // If we were using an editable input, we'd try to restore cursor position here.
-                    focusElementRef.current = null;
-                }
-            }, [isCalcOpen]);
-
-
-            // Load data on mount
-            useEffect(() => {
-                const savedData = localStorage.getItem('hnm_split_data');
-                if (savedData) {
-                    try {
-                        const parsed = JSON.parse(savedData);
-                        setUsers(parsed.users || { H: 'H 方', M: 'M 方' });
-                        setTransactions(parsed.transactions || []);
-                        if(parsed.rates) setBaseRates(parsed.rates);
-                    } catch (e) {
-                        console.error("Failed to parse localStorage data:", e);
-                        // Fallback to initial state on error
-                    }
-                }
-                fetchRates();
-            }, []);
-
-            // Save data on change
-            useEffect(() => {
-                localStorage.setItem('hnm_split_data', JSON.stringify({ users, transactions, rates: baseRates }));
-            }, [users, transactions, baseRates]);
-
-            // Fetch current exchange rates (Mock API Call)
-            const fetchRates = async () => {
+            // Fetch current exchange rates
+            const fetchRates = async (currentRates) => {
                 setRateLoading(true);
                 try {
-                    // Using an open API for rate fetching
                     const res = await fetch('https://api.exchangerate-api.com/v4/latest/TWD');
                     if (res.ok) {
                         const data = await res.json();
                         if (data && data.rates) {
-                            // Calculate TWD per foreign currency (1 / Rate)
-                            setBaseRates({
+                            const newRates = {
                                 USD: parseFloat((1 / data.rates.USD).toFixed(4)),
                                 JPY: parseFloat((1 / data.rates.JPY).toFixed(4))
-                            });
-                            await show('匯率已成功更新！');
+                            };
+                             await updateFirestoreData({ baseRates: newRates });
+                             await show('匯率已成功更新！');
+                        } else {
+                            await show('無法更新匯率，將使用上次儲存的值。', false);
                         }
                     } else {
-                        await show('無法更新匯率，將使用上次儲存的預設值。', false);
+                        await show('無法更新匯率，將使用上次儲存的值。', false);
                     }
                 } catch (e) {
                     console.error("Rate fetch failed:", e);
-                    await show('無法連線到匯率服務，將使用上次儲存的預設值。', false);
+                    await show('無法連線到匯率服務，將使用上次儲存的值。', false);
                 } finally {
                     setRateLoading(false);
                 }
             };
 
-            // Logic: Calculate Balance
+            const addTransaction = async (tx) => {
+                const newTransactions = [tx, ...transactions];
+                await updateFirestoreData({ transactions: newTransactions });
+                setView('HOME');
+            };
+
+            const deleteTransaction = async (id) => {
+                const confirmed = await show("確定要刪除這筆紀錄嗎？此動作無法復原。", true);
+                if(confirmed) {
+                    const newTransactions = transactions.filter(t => t.id !== id);
+                    await updateFirestoreData({ transactions: newTransactions });
+                    show("紀錄已刪除。");
+                }
+            };
+
+            const saveUserNames = async (newUsers) => {
+                await updateFirestoreData({ users: newUsers });
+            };
+            
+            const saveBaseRates = async (newRates) => {
+                await updateFirestoreData({ baseRates: newRates });
+            };
+
+            const clearAllData = async () => {
+                if (!db || !userId) return;
+                const docRef = getDataDocRef();
+                const initialData = { 
+                    users: DEFAULT_USERS, 
+                    transactions: [], 
+                    baseRates: DEFAULT_RATES
+                };
+                try {
+                    await setDoc(docRef, initialData);
+                    await show("所有資料已清除並重設。");
+                } catch (e) {
+                    console.error("Error clearing data:", e);
+                    show("清除資料失敗。", false);
+                }
+            };
+
+            // Logic: Calculate Balance (Unchanged)
             const balance = useMemo(() => {
                 let hPaid = 0; // Total TWD H actually paid out
                 let hShare = 0; // Total TWD H *should* have paid (fair share)
@@ -388,48 +523,34 @@
                 transactions.forEach(tx => {
                     const amountTWD = tx.amount * tx.rate;
                     
-                    // Who paid?
                     if (tx.payer === 'H') hPaid += amountTWD;
                     
-                    // Calculate H's share (what H should have paid)
                     if (tx.type === 'SETTLE') {
-                        // Settle up: This is a direct payment from Payer to the other person.
-                        // H's share of the EXPENSE is 0. 
-                        // If M pays H (payer='M'), H receives money, so H's share is the full amount to offset H's credit.
                         if (tx.payer === 'M') {
-                             hShare += amountTWD; // When M pays H, H receives M's payment (credit offset)
-                        } else {
-                            // If H pays M (payer='H'), H is paying off M's credit. H's share is 0 in this transaction.
-                        }
+                             hShare += amountTWD;
+                        } 
                     } else {
-                        // Expense
                         if (tx.splitType === 'EQUAL') {
                             hShare += amountTWD / 2;
                         } else {
-                            // Custom split: tx.customH is raw amount in original currency
                             hShare += Number(tx.customH || 0) * tx.rate;
                         }
                     }
                 });
 
-                // Positive = H Paid > H Share (H is creditor, M owes H)
-                // Negative = H Paid < H Share (H is debtor, H owes M)
-                return Math.round((hPaid - hShare) * 100) / 100; // Round to prevent float errors
-
+                return Math.round((hPaid - hShare) * 100) / 100;
             }, [transactions]);
 
-            const addTransaction = (tx) => {
-                setTransactions([tx, ...transactions]);
-                setView('HOME');
-            };
-
-            const deleteTransaction = async (id) => {
-                const confirmed = await show("確定要刪除這筆紀錄嗎？此動作無法復原。", true);
-                if(confirmed) {
-                    setTransactions(transactions.filter(t => t.id !== id));
-                    show("紀錄已刪除。");
-                }
-            };
+            if (dataLoading) {
+                return (
+                    <div className="app-container flex items-center justify-center min-h-screen bg-gray-50">
+                        <div className="flex flex-col items-center text-gray-500">
+                            <Icons.Loader size={36} className="text-teal-500 mb-3"/>
+                            <p className="font-medium">載入中，請稍候...</p>
+                        </div>
+                    </div>
+                );
+            }
 
             // --- Views ---
 
@@ -442,7 +563,10 @@
                                 <div className="w-8 h-8 bg-teal-500 rounded flex items-center justify-center text-white font-bold text-sm shadow-md">HM</div>
                                 <span className="font-bold text-gray-800 tracking-tight">HnM Split <span className="text-xs text-gray-400 font-normal ml-1">無賴帳本</span></span>
                             </div>
-                            <button onClick={() => setView('SETTINGS')} className="text-gray-400 p-2 rounded-full hover:bg-gray-100 transition-colors"><Icons.Settings /></button>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500 truncate max-w-[120px]">ID: {userId}</span>
+                                <button onClick={() => setView('SETTINGS')} className="text-gray-400 p-2 rounded-full hover:bg-gray-100 transition-colors"><Icons.Settings /></button>
+                            </div>
                         </div>
 
                         {/* Balance Card */}
@@ -532,7 +656,7 @@
                 const [currency, setCurrency] = useState('TWD');
                 const [payer, setPayer] = useState('H'); // Default H
                 const [splitType, setSplitType] = useState('EQUAL');
-                const [rate, setRate] = useState(1);
+                const [rate, setRate] = useState(baseRates.USD); // Initial rate will be fixed in useEffect
                 const [customH, setCustomH] = useState('');
                 const [customM, setCustomM] = useState('');
 
@@ -543,62 +667,49 @@
                     if (currency === 'TWD') setRate(1);
                     else if (currency === 'USD') setRate(baseRates.USD);
                     else if (currency === 'JPY') setRate(baseRates.JPY);
-                    // Ensure the rate is not NaN or 0 if it was updated by user before
                     if(rate === 0 || isNaN(rate)) setRate(1);
                 }, [currency, baseRates]);
 
                 // --- 自動計算邏輯 ---
-                // 處理 H 方金額變動
                 const handleCustomHChange = (value) => {
                     setCustomH(value);
                     const hValue = parseFloat(value);
                     if (!isNaN(hValue) && hValue >= 0 && totalAmount > 0) {
-                        // 計算 M 方應付金額 = 總金額 - H 方金額，並四捨五入到小數點後兩位
                         const mValue = Math.round((totalAmount - hValue) * 100) / 100;
                         setCustomM(mValue >= 0 ? mValue.toFixed(2) : '');
                     } else if (value === '' && totalAmount > 0) {
-                        // If H is cleared, M takes the total amount
                         setCustomM(totalAmount.toFixed(2));
                     }
                 };
 
-                // 處理 M 方金額變動
                 const handleCustomMChange = (value) => {
                     setCustomM(value);
                     const mValue = parseFloat(value);
                     if (!isNaN(mValue) && mValue >= 0 && totalAmount > 0) {
-                        // 計算 H 方應付金額 = 總金額 - M 方金額，並四捨五入到小數點後兩位
                         const hValue = Math.round((totalAmount - mValue) * 100) / 100;
                         setCustomH(hValue >= 0 ? hValue.toFixed(2) : '');
                     } else if (value === '' && totalAmount > 0) {
-                        // If M is cleared, H takes the total amount
                         setCustomH(totalAmount.toFixed(2));
                     }
                 };
                 
-                // 當金額或分攤類型改變時，重設自訂分攤金額或計算均分金額
                 useEffect(() => {
                     if (splitType === 'EQUAL' && totalAmount > 0) {
-                        // 均分時，自動設定為總金額的一半
                         const equalSplit = (totalAmount / 2).toFixed(2);
                         setCustomH(equalSplit);
                         setCustomM(equalSplit);
                     } else if (splitType === 'CUSTOM' && totalAmount > 0) {
-                        // 確保H和M至少有一個有值，且總和接近總金額
                         const currentH = Number(customH || 0);
                         const currentM = Number(customM || 0);
                         const totalCustom = currentH + currentM;
 
                         if (Math.abs(totalCustom - totalAmount) > 0.01) {
-                            // 如果當前分攤總和不對，且兩邊都沒輸入，則預設給H
                             if (currentH === 0 && currentM === 0) {
                                 setCustomH(totalAmount.toFixed(2));
                                 setCustomM('');
                             } else if (currentH > 0 && currentM === 0) {
-                                // 如果只輸入H，則M為剩餘
                                 handleCustomHChange(customH);
                             } else if (currentH === 0 && currentM > 0) {
-                                // 如果只輸入M，則H為剩餘
                                 handleCustomMChange(customM);
                             }
                         }
@@ -623,13 +734,12 @@
 
                     if (splitType === 'CUSTOM') {
                         const totalCustom = Math.round((finalCustomH + finalCustomM) * 100) / 100;
-                        // Check if the total custom split matches the total amount (allowing for small float differences)
                         if (Math.abs(totalCustom - totalAmount) > 0.01) { 
                             return await show(`自訂分攤金額總和 (${formatMoney(totalCustom)}) 必須等於總金額 (${formatMoney(totalAmount)})`);
                         }
                     }
 
-                    addTransaction({
+                    await addTransaction({
                         id: generateId(),
                         date: new Date().toISOString(),
                         type: 'EXPENSE',
@@ -657,7 +767,6 @@
                                 <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">金額與幣別</label>
                                 <div className="flex gap-3">
                                     <div className="relative flex-1">
-                                        {/* 調整：只在點擊此欄位時開啟計算機 */}
                                         <input 
                                             type="text" 
                                             readOnly 
@@ -676,7 +785,7 @@
                                 </div>
                                 {currency !== 'TWD' && (
                                     <div className="mt-3 bg-blue-50 p-3 rounded-lg flex items-center justify-between text-sm text-blue-800">
-                                        <span className="flex items-center gap-1">匯率 (1 {currency} = ) <input type="number" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} className="w-16 border-b border-blue-300 bg-transparent text-center font-bold outline-none"/> TWD</span>
+                                        <span className="flex items-center gap-1">匯率 (1 {currency} = ) <input type="number" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} onBlur={e => setRate(Number(e.target.value) || 1)} className="w-16 border-b border-blue-300 bg-transparent text-center font-bold outline-none"/> TWD</span>
                                         <span className="font-bold opacity-80">≈ {amount ? formatMoney(totalAmount * rate) : 0} TWD</span>
                                     </div>
                                 )}
@@ -710,7 +819,6 @@
                                     <div className="grid grid-cols-2 gap-4 animate-fade-in">
                                         <div>
                                             <label className="text-xs text-gray-500 mb-1 block">{users.H} 應付 ({currency})</label>
-                                            {/* 調整：只在點擊此欄位時開啟計算機 */}
                                             <input 
                                                 type="text" 
                                                 readOnly 
@@ -722,7 +830,6 @@
                                         </div>
                                         <div>
                                             <label className="text-xs text-gray-500 mb-1 block">{users.M} 應付 ({currency})</label>
-                                            {/* 調整：只在點擊此欄位時開啟計算機 */}
                                             <input 
                                                 type="text" 
                                                 readOnly 
@@ -745,11 +852,10 @@
             };
 
             const SettleView = () => {
-                // Ensure amount is positive for calculation
                 const defaultAmount = Math.abs(balance);
                 const [amount, setAmount] = useState(defaultAmount > 0 ? defaultAmount.toFixed(2) : '');
                 const [currency, setCurrency] = useState('TWD'); 
-                const [payer, setPayer] = useState(balance > 0 ? 'M' : 'H'); // If H is owed (balance>0), M pays H.
+                const [payer, setPayer] = useState(balance > 0 ? 'M' : 'H');
 
                 const [rate, setRate] = useState(1);
                 const settleAmount = Number(amount) || 0;
@@ -767,7 +873,7 @@
                         return await show('還款金額必須大於零');
                     }
 
-                     addTransaction({
+                     await addTransaction({
                         id: generateId(),
                         date: new Date().toISOString(),
                         type: 'SETTLE',
@@ -776,7 +882,7 @@
                         currency,
                         rate: Number(rate),
                         payer,
-                        splitType: 'SETTLE', // Special type
+                        splitType: 'SETTLE',
                         customH: 0, customM: 0
                     });
                 };
@@ -798,7 +904,6 @@
                                 <div>
                                     <label className="block text-xs font-bold text-gray-400 mb-1 uppercase">實際還款金額</label>
                                     <div className="flex gap-3">
-                                        {/* 調整：只在點擊此欄位時開啟計算機 */}
                                         <input 
                                             type="text" 
                                             readOnly 
@@ -814,7 +919,7 @@
                                     </div>
                                      {currency !== 'TWD' && (
                                         <div className="mt-2 text-sm text-gray-500 flex items-center gap-2 bg-gray-50 p-2 rounded-lg">
-                                            匯率: <input type="number" inputMode="decimal" value={rate} onChange={e=>setRate(e.target.value)} className="w-16 border-b text-center font-bold bg-transparent"/>
+                                            匯率: <input type="number" inputMode="decimal" value={rate} onChange={e=>setRate(e.target.value)} onBlur={e => setRate(Number(e.target.value) || 1)} className="w-16 border-b text-center font-bold bg-transparent"/>
                                             = {formatMoney(settleAmount*rate)} TWD
                                         </div>
                                     )}
@@ -885,11 +990,11 @@
                             <div className="space-y-4">
                                 <div>
                                     <label className="text-xs text-gray-500 mb-1 block">H 方代稱</label>
-                                    <input type="text" value={users.H} onChange={e => setUsers({...users, H: e.target.value})} className="w-full border-b pb-2 outline-none focus:border-teal-500 font-medium text-lg" placeholder="H 方" />
+                                    <input type="text" value={users.H} onChange={e => saveUserNames({...users, H: e.target.value})} className="w-full border-b pb-2 outline-none focus:border-teal-500 font-medium text-lg" placeholder="H 方" />
                                 </div>
                                 <div>
                                     <label className="text-xs text-gray-500 mb-1 block">M 方代稱</label>
-                                    <input type="text" value={users.M} onChange={e => setUsers({...users, M: e.target.value})} className="w-full border-b pb-2 outline-none focus:border-teal-500 font-medium text-lg" placeholder="M 方" />
+                                    <input type="text" value={users.M} onChange={e => saveUserNames({...users, M: e.target.value})} className="w-full border-b pb-2 outline-none focus:border-teal-500 font-medium text-lg" placeholder="M 方" />
                                 </div>
                             </div>
                         </div>
@@ -897,7 +1002,7 @@
                         <div>
                             <div className="flex justify-between items-end mb-4">
                                 <h3 className="text-sm font-bold text-gray-400 uppercase">預設匯率 (Base: TWD)</h3>
-                                <button onClick={fetchRates} disabled={rateLoading} className={`text-teal-600 text-xs font-bold flex items-center gap-1 p-2 rounded-lg ${rateLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-teal-50'}`}>
+                                <button onClick={() => fetchRates(baseRates)} disabled={rateLoading} className={`text-teal-600 text-xs font-bold flex items-center gap-1 p-2 rounded-lg ${rateLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-teal-50'}`}>
                                     <Icons.RefreshCw size={12} className={rateLoading ? 'animate-spin' : ''}/> 
                                     {rateLoading ? '更新中...' : '更新匯率'}
                                 </button>
@@ -907,7 +1012,14 @@
                                     <span className="font-medium text-gray-700">USD</span>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs text-gray-400">1 USD =</span>
-                                        <input type="number" inputMode="decimal" value={baseRates.USD} onChange={e => setBaseRates({...baseRates, USD: parseFloat(e.target.value)})} className="w-20 text-right font-bold outline-none" />
+                                        <input 
+                                            type="number" 
+                                            inputMode="decimal" 
+                                            value={baseRates.USD} 
+                                            onChange={e => setBaseRates({...baseRates, USD: parseFloat(e.target.value)})} 
+                                            onBlur={e => saveBaseRates({...baseRates, USD: Number(e.target.value) || 1})}
+                                            className="w-20 text-right font-bold outline-none" 
+                                        />
                                         <span className="text-xs text-gray-400">TWD</span>
                                     </div>
                                 </div>
@@ -915,7 +1027,14 @@
                                     <span className="font-medium text-gray-700">JPY</span>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs text-gray-400">1 JPY =</span>
-                                        <input type="number" inputMode="decimal" value={baseRates.JPY} onChange={e => setBaseRates({...baseRates, JPY: parseFloat(e.target.value)})} className="w-20 text-right font-bold outline-none" />
+                                        <input 
+                                            type="number" 
+                                            inputMode="decimal" 
+                                            value={baseRates.JPY} 
+                                            onChange={e => setBaseRates({...baseRates, JPY: parseFloat(e.target.value)})} 
+                                            onBlur={e => saveBaseRates({...baseRates, JPY: Number(e.target.value) || 1})}
+                                            className="w-20 text-right font-bold outline-none" 
+                                        />
                                         <span className="text-xs text-gray-400">TWD</span>
                                     </div>
                                 </div>
@@ -925,8 +1044,7 @@
                          <div className="pt-8 border-t">
                             <button onClick={() => { show('確定要清除所有資料嗎？此動作無法復原。', true).then(confirmed => {
                                 if (confirmed) {
-                                    localStorage.removeItem('hnm_split_data'); 
-                                    window.location.reload(); 
+                                    clearAllData();
                                 }
                             }); }} className="w-full py-3 text-rose-500 font-medium bg-rose-50 rounded-xl hover:bg-rose-100 transition-colors">
                                 清除所有資料
@@ -965,7 +1083,6 @@
                             initialValue={calcTarget.initialValue}
                             onClose={() => setIsCalcOpen(false)}
                             onOk={(result) => {
-                                // result is already a string with 2 decimal places from CalculatorModal
                                 calcTarget.setter(result);
                                 setIsCalcOpen(false);
                             }}
@@ -981,4 +1098,3 @@
     </script>
 </body>
 </html>
-Initial commit of the HnM_Spliter
