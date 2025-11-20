@@ -339,44 +339,6 @@
 
             // Logic: Calculate Balance (核心分帳邏輯)
             const balance = useMemo(() => {
-                let hPaid = 0; // H 實際支付的 TWD 總額
-                let hShare = 0; // H 應該分攤的 TWD 總額
-                
-                transactions.forEach(tx => {
-                    const amountTWD = tx.amount * tx.rate;
-                    
-                    if (tx.payer === 'H') {
-                        hPaid += amountTWD;
-                    }
-
-                    if (tx.type === 'SETTLE') {
-                        // SETTLE 紀錄：誰還錢，誰的債務就減少（或對方應得增加）
-                        if (tx.payer === 'M') { // M 還錢給 H
-                             hPaid -= amountTWD; // H 實際收到錢，所以淨支付減少
-                        } else { // H 還錢給 M
-                             hPaid += amountTWD; // H 實際支付錢，所以淨支付增加
-                        }
-                        // Settle does not affect 'share' logic, it affects 'paid' logic in the reverse way.
-                        // We will treat SETTLE records as an offset to hPaid.
-                        
-                    } else { // EXPENSE 支出紀錄
-                        if (tx.splitType === 'EQUAL') {
-                            hShare += amountTWD / 2;
-                        } else {
-                            // CustomH is in transaction's currency, so multiply by rate
-                            hShare += Number(tx.customH || 0) * tx.rate;
-                        }
-                    }
-                });
-                
-                // balance > 0 意味著 H 支付的比應付的多 (M 欠 H)
-                // balance < 0 意味著 H 支付的比應付的少 (H 欠 M)
-                // 為了更精確的結算邏輯，我們將 SETTLE 視為 EXPENSE 的反向操作，並將其計入 hPaid。
-                
-                // 調整後的結算邏輯：
-                // 1. 計算所有 EXPENSE 中 H 實際應付的總額 (hShare)
-                // 2. 計算所有 EXPENSE/SETTLE 中 H 實際支付的總額 (hPaid)
-                
                 let totalHPaid = 0; // H 實際支付的總金額
                 let totalHShare = 0; // H 應付的總金額
 
@@ -410,8 +372,37 @@
                 return Math.round((totalHPaid - totalHShare) * 100) / 100;
                 
             }, [transactions]);
+            
+            // --- Connection Status Indicator Component ---
+            const ConnectionStatusIndicator = () => {
+                let statusText = '連線中...';
+                let statusClass = 'bg-gray-400';
+                let icon = <Icons.Loader size={12} className="animate-spin" />;
 
-            if (dataLoading) {
+                if (dataLoading) {
+                    statusText = '載入資料中...';
+                    statusClass = 'bg-blue-500';
+                    icon = <Icons.Loader size={12} className="animate-spin" />;
+                } else if (isAuthReady && db && userId) {
+                    statusText = '已連線並同步';
+                    statusClass = 'bg-teal-600';
+                    icon = <Icons.CheckCircle size={12} />;
+                } else if (isAuthReady && !db) {
+                     statusText = '連線錯誤 (本機模式)';
+                     statusClass = 'bg-rose-500';
+                     icon = <Icons.Settings size={12} />;
+                }
+
+
+                return (
+                    <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-white shadow-md ${statusClass}`}>
+                        {icon}
+                        {statusText}
+                    </div>
+                );
+            };
+
+            if (dataLoading && !isAuthReady) {
                 return (
                     <div className="app-container flex items-center justify-center min-h-screen bg-gray-50">
                         <div className="flex flex-col items-center text-gray-500">
@@ -440,7 +431,11 @@
                                     <div className="w-8 h-8 bg-teal-500 rounded-full flex items-center justify-center text-white font-black text-lg shadow-md">H M</div>
                                     <span className="font-black text-gray-900 tracking-tight text-xl">無賴帳本 <span className="text-xs text-gray-400 font-normal ml-1">HnM Split</span></span>
                                 </div>
-                                <button onClick={() => setView('SETTINGS')} className="text-gray-400 p-2 rounded-full hover:bg-gray-100 transition-colors"><Icons.Settings /></button>
+                                <div className="flex items-center gap-2">
+                                    {/* NEW: Connection Status Indicator */}
+                                    <ConnectionStatusIndicator />
+                                    <button onClick={() => setView('SETTINGS')} className="text-gray-400 p-2 rounded-full hover:bg-gray-100 transition-colors"><Icons.Settings /></button>
+                                </div>
                             </div>
 
                             {/* Balance Display (要求4: 醒目欄位) */}
