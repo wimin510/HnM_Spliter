@@ -12,97 +12,95 @@ import {
   query, 
   onSnapshot, 
   addDoc, 
-  setDoc, 
   doc,
   deleteDoc,
-  Timestamp,
-  setLogLevel
+  setLogLevel,
+  serverTimestamp,
+  limit,
+  orderBy
 } from 'firebase/firestore';
 
+// --- 全域變數初始化 ---
 // 確保全域變數存在，以便在 Canvas 環境中運行
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+let firebaseConfig = null;
+try {
+  // **修正：重新從 Canvas 環境的全局變數中讀取配置，以確保 API Key 有效。**
+  firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+} catch (e) {
+  console.error("解析 Firebase 配置時發生錯誤:", e);
+}
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// 定義 Firestore 資料結構的 TypeScript 介面，以提供更好的類型檢查
-/**
- * @typedef {object} Expense
- * @property {string} id
- * @property {string} description
- * @property {number} amount
- * @property {string} paidBy
- * @property {string} sharedWith
- * @property {number} timestamp
- */
 
-/**
- * @typedef {object} UserShare
- * @property {string} userId
- * @property {string} name
- */
-
-// 預設的費用分攤選項
-const SHARING_OPTIONS = [
-  { id: 'all', name: '均攤' },
-  { id: 'me', name: '僅限自己' },
-  // 可以在這裡添加更多選項
+// --- 應用程式常數 ---
+const CURRENCIES = [
+  { code: 'TWD', symbol: 'NT$', name: '新台幣' },
+  { code: 'JPY', symbol: '¥', name: '日圓' },
+  { code: 'USD', symbol: '$', name: '美元' },
 ];
 
-// 預設的付款人選項
-const PAID_BY_OPTIONS = [
-  { id: 'me', name: '我' },
-  // 可以在這裡添加其他家庭成員/用戶
-];
+// 兩位分帳用戶 (H 和 M)
+const USER_H = 'H';
+const USER_M = 'M';
+
+// 用於 UI 顯示的用戶名稱
+const USER_NAMES = {
+  [USER_H]: 'H (你)',
+  [USER_M]: 'M (伴侶)',
+};
 
 const App = () => {
+  // --- 狀態管理 ---
   const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
   const [userId, setUserId] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [expenses, setExpenses] = useState([]);
+  const [expenses, setExpenses] = useState([]); // 所有費用記錄
+  const [showConfirm, setShowConfirm] = useState(null); // 用於自訂確認對話框
 
+  // 新增費用表單狀態
   const [newExpense, setNewExpense] = useState({
     description: '',
-    amount: '',
-    paidBy: PAID_BY_OPTIONS[0].id,
-    sharedWith: SHARING_OPTIONS[0].id,
+    totalAmount: 0,
+    currency: CURRENCIES[0].code,
+    paidBy: USER_H,
+    // 兩人的分攤金額
+    splitH: 0, 
+    splitM: 0,
+    // 日期 (格式: YYYY-MM-DD)
+    date: new Date().toISOString().substring(0, 10), 
   });
 
-  // 1. Firebase 初始化和認證
+  // --- Firebase 初始化與認證 ---
   useEffect(() => {
+    // 這裡我們直接使用 firebaseConfig，而不是依賴 __firebase_config
     if (!firebaseConfig) {
-      setError("Firebase 設定未提供。請在 Canvas 環境中執行。");
+      setError("Firebase 配置遺失。請提供有效的 Firebase 配置。");
       setLoading(false);
       return;
     }
 
     try {
-      // 設置 Firestore 日誌級別為 Debug 以協助除錯 (建議在開發時開啟)
-      // setLogLevel('debug'); 
-      
+      setLogLevel('debug'); 
+      // 使用從全局變數讀取的配置進行初始化
       const app = initializeApp(firebaseConfig);
       const firestore = getFirestore(app);
       const authInstance = getAuth(app);
       
       setDb(firestore);
-      setAuth(authInstance);
 
-      // 設置身份驗證狀態變化的監聽器
-      const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+      const unsubscribeAuth = onAuthStateChanged(authInstance, (user) => {
         if (user) {
-          // 用戶已登入 (無論是使用 Custom Token 還是匿名登入)
           setUserId(user.uid);
         } else {
-          // 用戶已登出
           setUserId(null);
         }
         setIsAuthReady(true);
         setLoading(false);
       });
 
-      // 處理初始登入 (使用 Custom Token 或匿名登入)
       const handleSignIn = async () => {
         try {
           if (initialAuthToken) {
@@ -112,83 +110,176 @@ const App = () => {
           }
         } catch (e) {
           console.error("Firebase 登入失敗:", e);
-          setError("登入失敗。請檢查 Firebase 專案設定。");
+          setError(`登入失敗: ${e.message}`);
         }
       };
 
       handleSignIn();
-
-      // 清理函數：在元件卸載時取消監聽
-      return () => unsubscribe();
+      return () => unsubscribeAuth();
     } catch (e) {
       console.error("Firebase 初始化失敗:", e);
       setError(`初始化失敗: ${e.message}`);
       setLoading(false);
     }
-  }, []); // 只運行一次
+  }, []);
 
-  // 2. 資料庫連線和即時資料監聽 (onSnapshot)
+  // --- 資料庫連線與即時監聽 ---
   useEffect(() => {
-    // 只有在 Firebase 服務和用戶 ID 都準備好後才開始監聽
     if (!db || !isAuthReady || !userId) {
       return;
     }
 
     // Firestore 路徑： /artifacts/{appId}/public/data/expenses
-    // 這是公共資料路徑，所有用戶共享相同的費用清單
     const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
+    // 為了計算總餘額，我們需要監聽所有記錄
+    // 注意：這裡移除了 orderBy(date) 和 limit()，因為在客戶端排序更簡單且不易觸發 Firestore 索引錯誤
     const q = query(collection(db, expensesCollectionPath));
 
-    // 使用 onSnapshot 實現即時更新
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedExpenses = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      // 按照時間戳記降序排序，最新的費用排在最前面
-      fetchedExpenses.sort((a, b) => b.timestamp - a.timestamp);
+    const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+      const fetchedExpenses = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // 處理日期格式：如果 Firestore 伺服器時間戳記存在，則使用它來決定排序順序
+          // 這裡將 date 轉換為 YYYY-MM-DD 字串，以確保顯示正確
+          date: data.date && data.date.toDate ? data.date.toDate().toISOString().substring(0, 10) : data.date || 'N/A',
+          timestamp: data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().getTime() : 0, // 用於排序
+        }
+      });
       setExpenses(fetchedExpenses);
+      setError(null);
     }, (e) => {
-      console.error("Firestore 連線或監聽失敗:", e);
-      // 發生錯誤時，可能是因為規則不允許讀取。
-      // 但我們已要求使用者設置了開放規則，所以通常是連線問題。
+      console.error("Firestore 監聽失敗:", e);
       setError(`資料讀取失敗: ${e.message}. 請檢查您的 Firestore 安全規則。`);
     });
 
-    // 清理函數：在 db, isAuthReady 或 userId 變化時取消監聽
-    return () => unsubscribe();
+    return () => unsubscribeSnapshot();
   }, [db, isAuthReady, userId]);
 
-  // 處理表單輸入變化
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  // --- 刪除費用 - 觸發自訂確認對話框 ---
+  const confirmDeleteExpense = (expenseId) => {
+    setShowConfirm({
+      message: '確定要刪除這筆費用嗎？',
+      onConfirm: () => deleteExpense(expenseId),
+    });
+  };
+
+  // 實際刪除 Firestore 中的文件
+  const deleteExpense = useCallback(async (expenseId) => {
+    if (!db) return;
+
+    try {
+      const expenseDocPath = `artifacts/${appId}/public/data/expenses/${expenseId}`;
+      await deleteDoc(doc(db, expenseDocPath));
+      setShowConfirm(null); // 關閉確認對話框
+    } catch (e) {
+      console.error("刪除費用失敗:", e);
+      setError(`刪除費用失敗: ${e.message}`);
+    }
+  }, [db, appId]);
+
+  // --- 自訂分帳邏輯 (Requirement 3) ---
+
+  // 處理總金額變更
+  const handleTotalAmountChange = (value) => {
+    const total = parseFloat(value) || 0;
+    
+    // 總金額變更時，保持分攤比例，如果之前是均分，則保持均分
+    let splitH = (newExpense.splitH / newExpense.totalAmount) * total;
+    let splitM = total - splitH;
+    
+    // 如果總金額之前是 0，則新金額直接均分
+    if (newExpense.totalAmount === 0 || total === 0 || isNaN(splitH)) {
+        splitH = total / 2;
+        splitM = total / 2;
+    }
+
     setNewExpense(prev => ({
       ...prev,
-      [name]: name === 'amount' ? parseFloat(value) || 0 : value,
+      totalAmount: total,
+      splitH: parseFloat(splitH.toFixed(2)),
+      splitM: parseFloat(splitM.toFixed(2)),
     }));
   };
 
-  // 將新費用添加到 Firestore
+  // 處理 H 的分帳金額變更
+  const handleSplitHChange = (value) => {
+    const splitH = parseFloat(value) || 0;
+    const total = newExpense.totalAmount;
+    const splitM = total - splitH; // 自動計算 M 的分攤金額
+    
+    setNewExpense(prev => ({
+      ...prev,
+      splitH: parseFloat(splitH.toFixed(2)),
+      // 確保 M 的分攤金額不會小於 0 且不超過總金額
+      splitM: parseFloat(Math.min(total, Math.max(0, splitM)).toFixed(2)), 
+    }));
+  };
+
+  // 處理 M 的分帳金額變更
+  const handleSplitMChange = (value) => {
+    const splitM = parseFloat(value) || 0;
+    const total = newExpense.totalAmount;
+    const splitH = total - splitM; // 自動計算 H 的分攤金額
+    
+    setNewExpense(prev => ({
+      ...prev,
+      splitM: parseFloat(splitM.toFixed(2)),
+      // 確保 H 的分攤金額不會小於 0 且不超過總金額
+      splitH: parseFloat(Math.min(total, Math.max(0, splitH)).toFixed(2)),
+    }));
+  };
+  
+  // 處理其他輸入變化 (描述, 幣別, 付款人, 日期)
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    if (name === 'totalAmount') {
+      handleTotalAmountChange(value);
+    } else if (name === 'splitH') {
+      handleSplitHChange(value);
+    } else if (name === 'splitM') {
+      handleSplitMChange(value);
+    } else {
+      setNewExpense(prev => ({ ...prev, [name]: value }));
+    }
+  };
+
+  // --- 新增費用到 Firestore ---
   const addExpense = useCallback(async () => {
     if (!db || !userId) {
-      alert("資料庫未準備好或用戶未登入。");
+      alertMessage("資料庫未準備好或用戶未登入。");
       return;
     }
 
-    if (newExpense.description.trim() === '' || newExpense.amount <= 0) {
-      alert("請輸入有效的費用說明和金額。");
+    const { description, totalAmount, currency, paidBy, splitH, splitM, date } = newExpense;
+    
+    if (description.trim() === '' || totalAmount <= 0) {
+      alertMessage("請輸入有效的費用說明和總金額。");
+      return;
+    }
+
+    // 檢查分攤總額是否與總金額匹配 (允許微小浮點數誤差)
+    const splitSum = splitH + splitM;
+    if (Math.abs(splitSum - totalAmount) > 0.01) {
+      alertMessage(`分攤總額 (${splitSum.toFixed(2)}) 與總金額 (${totalAmount.toFixed(2)}) 不符，請檢查。`);
       return;
     }
 
     try {
+      // 確保儲存的數值是浮點數，而不是字串
       const dataToSave = {
-        description: newExpense.description.trim(),
-        amount: newExpense.amount,
-        paidBy: newExpense.paidBy,
-        sharedWith: newExpense.sharedWith,
-        timestamp: Date.now(), // 使用 JavaScript 時間戳記 (毫秒)
-        userId: userId, // 記錄創建此費用的用戶 ID
-        userName: `User ${userId.slice(0, 4)}`, // 簡短的用戶名稱用於顯示
+        description: description.trim(),
+        totalAmount: parseFloat(totalAmount.toFixed(2)),
+        currency: currency,
+        paidBy: paidBy,
+        date: date, // 儲存日期字串 (YYYY-MM-DD)
+        split: { 
+          [USER_H]: parseFloat(splitH.toFixed(2)), 
+          [USER_M]: parseFloat(splitM.toFixed(2)) 
+        },
+        timestamp: serverTimestamp(), // 使用 Firestore 伺服器時間戳記進行排序
+        createdByUserId: userId,
       };
 
       const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
@@ -197,9 +288,12 @@ const App = () => {
       // 清除表單
       setNewExpense({
         description: '',
-        amount: '',
-        paidBy: PAID_BY_OPTIONS[0].id,
-        sharedWith: SHARING_OPTIONS[0].id,
+        totalAmount: 0,
+        currency: CURRENCIES[0].code,
+        paidBy: USER_H,
+        splitH: 0,
+        splitM: 0,
+        date: new Date().toISOString().substring(0, 10),
       });
 
     } catch (e) {
@@ -207,150 +301,219 @@ const App = () => {
       setError(`新增費用失敗: ${e.message}`);
     }
   }, [db, userId, newExpense, appId]);
+  
+  // 模擬 alert 提示 (由於不能使用原生 alert)
+  const alertMessage = (message) => {
+    console.warn("應用程式提示:", message);
+    setError(message);
+    setTimeout(() => setError(null), 4000); 
+  };
 
-  // 刪除費用
-  const deleteExpense = useCallback(async (expenseId) => {
-    if (!db) return;
+  // --- 核心結算邏輯 (Requirement 4) ---
+  const balanceByCurrency = useMemo(() => {
+    const balance = {}; 
 
-    // 替換原生 confirm()
-    if (!window.confirm('確定要刪除這筆費用嗎？')) {
-      return;
-    }
-
-    try {
-      const expenseDocPath = `artifacts/${appId}/public/data/expenses/${expenseId}`;
-      await deleteDoc(doc(db, expenseDocPath));
-    } catch (e) {
-      console.error("刪除費用失敗:", e);
-      setError(`刪除費用失敗: ${e.message}`);
-    }
-  }, [db, appId]);
-
-
-  // 3. 核心計算邏輯
-  const { totalExpenditure, userOwes, userPaid } = useMemo(() => {
-    let totalExpenditure = 0;
-    let userOwes = 0; // 用戶應負擔的金額
-    let userPaid = 0; // 用戶已支付的金額
-
-    expenses.forEach(expense => {
-      totalExpenditure += expense.amount;
-
-      // 計算用戶已支付
-      if (expense.paidBy === 'me') {
-        userPaid += expense.amount;
-      }
-
-      // 簡化計算：只處理 'all' 和 'me' 的分攤邏輯
-      let shareFactor = 0;
-      if (expense.sharedWith === 'all') {
-        // 假設 'all' 分攤給 2 人 (用戶自己 + 另一個假設的用戶)
-        shareFactor = 1 / 2;
-      } else if (expense.sharedWith === 'me') {
-        shareFactor = 1; // 僅自己負擔
-      }
-      
-      userOwes += expense.amount * shareFactor;
+    CURRENCIES.forEach(c => {
+      balance[c.code] = { 
+        [USER_H]: 0, // H 實際支付
+        [USER_M]: 0, // M 實際支付
+        H_Owed: 0,   // H 應負擔
+        M_Owed: 0,   // M 應負擔
+        net: 0      // H 的淨餘額 (正: M 欠 H; 負: H 欠 M)
+      };
     });
 
-    // 淨結算：如果為正，表示用戶應收款；如果為負，表示用戶應付款
-    const netBalance = userPaid - userOwes;
+    expenses.forEach(expense => {
+      const { currency, totalAmount, paidBy, split } = expense;
+      
+      if (!balance[currency]) return; 
 
-    return {
-      totalExpenditure,
-      userOwes,
-      userPaid,
-      netBalance
-    };
+      // 1. 紀錄實際支付
+      if (paidBy === USER_H) {
+        balance[currency][USER_H] += totalAmount;
+      } else if (paidBy === USER_M) {
+        balance[currency][USER_M] += totalAmount;
+      }
+
+      // 2. 紀錄應負擔份額
+      balance[currency].H_Owed += (split?.[USER_H] || 0);
+      balance[currency].M_Owed += (split?.[USER_M] || 0);
+    });
+
+    Object.keys(balance).forEach(code => {
+      const b = balance[code];
+      
+      // M 欠 H = M 應負擔 - M 支付 (如果為正，M 欠 H)
+      const M_owes_H = b.M_Owed - b[USER_M];
+      // H 欠 M = H 應負擔 - H 支付 (如果為正，H 欠 M)
+      const H_owes_M = b.H_Owed - b[USER_H];
+      
+      // 淨結算 (H 的角度) = M 欠 H - H 欠 M
+      balance[code].net = M_owes_H - H_owes_M;
+    });
+
+    return balance;
   }, [expenses]);
-
-
-  // 處理載入和錯誤狀態的 UI
+  
+  // 找到主要幣別的淨餘額 (TWD)
+  const mainBalance = balanceByCurrency[CURRENCIES[0].code]?.net || 0;
+  
+  // 最近五筆紀錄 (Requirement 5) - 在客戶端排序和限制數量
+  const recentExpenses = useMemo(() => {
+    return expenses
+      // 依據時間戳記 (或 date) 排序
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 5);
+  }, [expenses]);
+  
+  // --- UI 輔助函數 ---
+  const formatCurrency = (amount, currencyCode) => {
+    const { symbol } = CURRENCIES.find(c => c.code === currencyCode) || { symbol: '' };
+    const num = parseFloat(amount);
+    return isNaN(num) ? 'N/A' : `${symbol} ${num.toFixed(2)}`;
+  };
+  
+  // --- 渲染 ---
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
-        <div className="text-xl font-semibold">載入中... 正在建立 Firebase 連線...</div>
+        <div className="text-xl font-semibold text-indigo-400">載入中... 正在連接 Firebase...</div>
       </div>
     );
   }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-red-400 p-8">
-        <div className="text-2xl font-bold mb-4">連線錯誤</div>
-        <pre className="bg-gray-800 p-4 rounded-lg text-sm whitespace-pre-wrap max-w-lg">{error}</pre>
-        <p className="mt-4 text-gray-400">請檢查瀏覽器控制台中的詳細錯誤訊息，並確認 Firebase 規則已正確發佈。</p>
-      </div>
-    );
-  }
-
-  // 格式化金額
-  const formatCurrency = (amount) => {
-    return `${amount.toFixed(2)} TWD`;
-  };
-
-  const netBalance = userPaid - userOwes;
-
-  const statusText = isAuthReady && userId 
-    ? "連線狀態：Firestore 已連線"
-    : "連線狀態：初始化錯誤或登入中";
-  
-  const statusColor = isAuthReady && userId ? "text-green-400" : "text-yellow-400";
-
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans p-4 sm:p-8">
       
+      {/* 頂部錯誤提示 */}
+      {error && (
+        <div className="fixed top-0 left-0 right-0 p-3 bg-red-700 text-white text-center z-50 shadow-lg">
+          {error}
+        </div>
+      )}
+
       {/* 標題與狀態 */}
-      <header className="max-w-4xl mx-auto mb-8 text-center">
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-400 tracking-tight">家庭收支分攤計算器 (HnM Splitter)</h1>
-        <p className={`mt-4 text-sm font-medium ${statusColor}`}>
-          {statusText} | 用戶 ID: {userId || 'N/A'}
+      <header className="max-w-4xl mx-auto mb-8 text-center pt-2">
+        <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-400 tracking-tight">無賴帳本 (HnM Splitter)</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          連線狀態: <span className={isAuthReady && userId ? "text-green-400" : "text-red-400"}>{isAuthReady && userId ? "已連線" : "連線中/錯誤"}</span>
         </p>
-        <p className="text-xs text-gray-500 mt-1">
-          此 ID 用於共享資料，請記住或告知您的夥伴。
+        <p className="text-xs text-gray-600">
+          您的 Canvas ID: <span className="font-mono">{userId || 'N/A'}</span>
         </p>
       </header>
+      
+      {/* 醒目欠款狀態 (Requirement 4) */}
+      <section className="max-w-2xl mx-auto mb-10 p-6 rounded-xl shadow-2xl transition duration-300 
+        transform hover:scale-[1.02]
+        border-4 
+        border-dashed
+        bg-gray-800/70
+        backdrop-blur-sm
+        ">
+        <h2 className="text-2xl font-bold mb-4 text-center text-indigo-300">總結算狀態 ({CURRENCIES[0].code})</h2>
+        <div className="text-center">
+          {mainBalance > 0.01 ? (
+            <div className="text-green-400">
+              <p className="text-4xl font-extrabold">{USER_NAMES[USER_M]} 欠 {USER_NAMES[USER_H]}</p>
+              <p className="text-6xl font-black mt-2">{formatCurrency(mainBalance, CURRENCIES[0].code)}</p>
+            </div>
+          ) : mainBalance < -0.01 ? (
+            <div className="text-red-400">
+              <p className="text-4xl font-extrabold">{USER_NAMES[USER_H]} 欠 {USER_NAMES[USER_M]}</p>
+              <p className="text-6xl font-black mt-2">{formatCurrency(Math.abs(mainBalance), CURRENCIES[0].code)}</p>
+            </div>
+          ) : (
+            <div className="text-yellow-400">
+              <p className="text-4xl font-extrabold">帳目結清！</p>
+              <p className="text-6xl font-black mt-2">{formatCurrency(0, CURRENCIES[0].code)}</p>
+            </div>
+          )}
+        </div>
+        
+        {/* 其他幣別的簡要顯示 */}
+        {CURRENCIES.slice(1).map(({ code, symbol }) => {
+          const balance = balanceByCurrency[code]?.net || 0;
+          if (Math.abs(balance) < 0.01) return null; // 忽略已結清的幣別
+          return (
+            <p key={code} className={`text-sm mt-2 font-mono text-center ${balance > 0 ? 'text-green-300' : 'text-red-300'}`}>
+              ({code}: {balance > 0 ? `${USER_NAMES[USER_M]} 欠 ${USER_NAMES[USER_H]} ${formatCurrency(balance, code)}` : `${USER_NAMES[USER_H]} 欠 ${USER_NAMES[USER_M]} ${formatCurrency(Math.abs(balance), code)}`})
+            </p>
+          );
+        })}
+
+      </section>
 
       {/* 新增費用區塊 */}
-      <section className="max-w-2xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl mb-10">
-        <h2 className="text-2xl font-bold mb-6 text-indigo-300">新增一筆費用</h2>
+      <section className="max-w-4xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl mb-10">
+        <h2 className="text-2xl font-bold mb-6 text-indigo-300">新增紀錄</h2>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           
-          {/* 費用說明 */}
-          <div className="col-span-1 sm:col-span-2">
-            <label htmlFor="description" className="block text-sm font-medium text-gray-400 mb-1">費用說明 (例如: 晚餐外送)</label>
-            <input
-              type="text"
-              id="description"
-              name="description"
-              value={newExpense.description}
-              onChange={handleInputChange}
-              placeholder="輸入費用說明"
-              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-            />
+          {/* 費用說明與日期 */}
+          <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="description" className="block text-sm font-medium text-gray-400 mb-1">費用說明</label>
+              <input
+                type="text"
+                id="description"
+                name="description"
+                value={newExpense.description}
+                onChange={handleInputChange}
+                placeholder="例如: 週末採買"
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+              />
+            </div>
+            {/* 紀錄日期 (Requirement 6) */}
+            <div>
+              <label htmlFor="date" className="block text-sm font-medium text-gray-400 mb-1">紀錄日期</label>
+              <input
+                type="date"
+                id="date"
+                name="date"
+                value={newExpense.date}
+                onChange={handleInputChange}
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+              />
+            </div>
           </div>
 
-          {/* 金額 */}
-          <div>
-            <label htmlFor="amount" className="block text-sm font-medium text-gray-400 mb-1">金額 (TWD)</label>
-            <input
-              type="number"
-              id="amount"
-              name="amount"
-              value={newExpense.amount}
-              onChange={handleInputChange}
-              placeholder="0.00"
-              min="0.01"
-              step="0.01"
-              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
-            />
+          {/* 總金額與幣別 */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="totalAmount" className="block text-sm font-medium text-gray-400 mb-1">總金額</label>
+              <input
+                type="number"
+                id="totalAmount"
+                name="totalAmount"
+                value={newExpense.totalAmount === 0 ? '' : newExpense.totalAmount}
+                onChange={handleInputChange}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+              />
+            </div>
+            {/* 幣別選擇 (Requirement 2) */}
+            <div>
+              <label htmlFor="currency" className="block text-sm font-medium text-gray-400 mb-1">幣別</label>
+              <select
+                id="currency"
+                name="currency"
+                value={newExpense.currency}
+                onChange={handleInputChange}
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
+              >
+                {CURRENCIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                ))}
+              </select>
+            </div>
           </div>
           
           {/* 付款人 */}
           <div>
-            <label htmlFor="paidBy" className="block text-sm font-medium text-gray-400 mb-1">付款人</label>
+            <label htmlFor="paidBy" className="block text-sm font-medium text-gray-400 mb-1">由誰支付?</label>
             <select
               id="paidBy"
               name="paidBy"
@@ -358,105 +521,129 @@ const App = () => {
               onChange={handleInputChange}
               className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
             >
-              {PAID_BY_OPTIONS.map(option => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
+              <option value={USER_H}>{USER_NAMES[USER_H]}</option>
+              <option value={USER_M}>{USER_NAMES[USER_M]}</option>
             </select>
           </div>
           
-          {/* 分攤對象 */}
-          <div>
-            <label htmlFor="sharedWith" className="block text-sm font-medium text-gray-400 mb-1">分攤對象</label>
-            <select
-              id="sharedWith"
-              name="sharedWith"
-              value={newExpense.sharedWith}
-              onChange={handleInputChange}
-              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
-            >
-              {SHARING_OPTIONS.map(option => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
-            </select>
+          {/* 分攤金額 (Requirement 3) */}
+          <div className="col-span-1 md:col-span-2">
+            <h3 className="text-md font-medium text-gray-400 mb-2 mt-2 border-t border-gray-700 pt-3">分攤金額 (兩者總和應接近總金額)</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {/* H 分攤金額 */}
+              <div>
+                <label htmlFor="splitH" className="block text-sm font-medium text-gray-400 mb-1">{USER_NAMES[USER_H]}</label>
+                <input
+                  type="number"
+                  id="splitH"
+                  name="splitH"
+                  value={newExpense.splitH === 0 && newExpense.totalAmount === 0 ? '' : newExpense.splitH}
+                  onChange={handleInputChange}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+                />
+              </div>
+              {/* M 分攤金額 */}
+              <div>
+                <label htmlFor="splitM" className="block text-sm font-medium text-gray-400 mb-1">{USER_NAMES[USER_M]}</label>
+                <input
+                  type="number"
+                  id="splitM"
+                  name="splitM"
+                  value={newExpense.splitM === 0 && newExpense.totalAmount === 0 ? '' : newExpense.splitM}
+                  onChange={handleInputChange}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+                />
+              </div>
+            </div>
           </div>
-          
+
           {/* 送出按鈕 */}
-          <div className="col-span-1 sm:col-span-2 flex justify-end mt-2">
+          <div className="col-span-1 md:col-span-2 flex justify-end mt-4">
             <button
               onClick={addExpense}
-              className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transition duration-200"
-              disabled={newExpense.description.trim() === '' || newExpense.amount <= 0}
+              className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transition duration-200 disabled:opacity-50"
+              disabled={newExpense.description.trim() === '' || newExpense.totalAmount <= 0 || !userId}
             >
-              新增費用
+              儲存紀錄
             </button>
           </div>
         </div>
       </section>
 
-      {/* 結算結果區塊 */}
-      <section className="max-w-4xl mx-auto mb-10 p-6 bg-gray-800 rounded-xl shadow-2xl">
-        <h2 className="text-2xl font-bold mb-6 text-indigo-300">費用明細與結算</h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-          <div className="p-4 bg-gray-700 rounded-lg shadow-inner">
-            <p className="text-sm text-gray-400">總支出</p>
-            <p className="text-2xl font-bold text-yellow-300 mt-1">{formatCurrency(totalExpenditure)}</p>
-          </div>
-          <div className="p-4 bg-gray-700 rounded-lg shadow-inner">
-            <p className="text-sm text-gray-400">我的份額 (應付)</p>
-            <p className="text-2xl font-bold text-red-400 mt-1">{formatCurrency(userOwes)}</p>
-          </div>
-          <div className={`p-4 rounded-lg shadow-inner ${netBalance >= 0 ? 'bg-green-800/50' : 'bg-red-800/50'}`}>
-            <p className="text-sm text-gray-300">結算結果</p>
-            <p className="text-2xl font-bold mt-1">
-              {netBalance >= 0 ? 
-                <span className="text-green-400">應收 {formatCurrency(netBalance)}</span> : 
-                <span className="text-red-400">應付 {formatCurrency(Math.abs(netBalance))}</span>
-              }
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* 費用清單 */}
+      {/* 最近紀錄清單 (Requirement 5) */}
       <section className="max-w-4xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl">
-        <h3 className="text-xl font-bold mb-4 text-indigo-300">費用清單 ({expenses.length} 筆)</h3>
+        <h3 className="text-xl font-bold mb-4 text-indigo-300">最近五筆紀錄</h3>
         
-        {expenses.length === 0 ? (
-          <p className="text-gray-400 text-center py-8">目前沒有費用記錄。</p>
+        {recentExpenses.length === 0 ? (
+          <p className="text-gray-400 text-center py-8">目前沒有任何紀錄。</p>
         ) : (
           <div className="space-y-3">
-            {expenses.map((expense) => (
+            {recentExpenses.map((expense) => (
               <div 
                 key={expense.id} 
-                className="flex justify-between items-center p-4 bg-gray-700 rounded-lg shadow-md transition duration-150 hover:bg-gray-600"
+                className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-gray-700 rounded-lg shadow-md"
               >
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 mb-2 sm:mb-0">
                   <p className="text-lg font-semibold text-white truncate">{expense.description}</p>
-                  <div className="text-sm text-gray-400 space-x-3">
-                    <span className="font-mono">{formatCurrency(expense.amount)}</span>
-                    <span className="text-xs">| 由 <span className="text-indigo-300 font-medium">{PAID_BY_OPTIONS.find(o => o.id === expense.paidBy)?.name || '未知'}</span> 支付</span>
-                    <span className="text-xs">| 分攤給 <span className="text-indigo-300 font-medium">{SHARING_OPTIONS.find(o => o.id === expense.sharedWith)?.name || '未知'}</span></span>
+                  <div className="text-sm text-gray-400 space-y-1 sm:space-y-0 sm:space-x-3 mt-1">
+                    <span className="font-mono text-base text-yellow-300">{formatCurrency(expense.totalAmount, expense.currency)}</span>
+                    <span className="text-xs">| 日期: {expense.date}</span>
+                    <span className="text-xs">| 付款人: <span className="text-indigo-300 font-medium">{USER_NAMES[expense.paidBy]}</span></span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                     創建者 ID: {expense.createdByUserId ? `${expense.createdByUserId.substring(0, 8)}...` : 'N/A'}
                   </div>
                 </div>
                 
-                <button
-                  onClick={() => deleteExpense(expense.id)}
-                  className="ml-4 p-2 text-red-400 hover:text-red-500 rounded-full transition duration-150"
-                  title="刪除費用"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
-                  </svg>
-                </button>
+                <div className="text-sm text-gray-300 text-right flex items-center space-x-4">
+                    <div>
+                        <p>H 分攤: {formatCurrency(expense.split?.[USER_H] || 0, expense.currency)}</p>
+                        <p>M 分攤: {formatCurrency(expense.split?.[USER_M] || 0, expense.currency)}</p>
+                    </div>
+                    <button
+                      onClick={() => confirmDeleteExpense(expense.id)}
+                      className="p-2 text-red-400 hover:text-red-500 rounded-full transition duration-150"
+                      title="刪除費用"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </section>
       
-      {/* 底部浮動按鈕 - 替換原生 alert */}
-      <div id="custom-alert-container"></div>
+      {/* 自訂確認對話框 Modal */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
+            <p className="text-lg font-semibold text-white mb-6">{"確定要刪除這筆費用嗎？"}</p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowConfirm(null)}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-white font-medium transition duration-150"
+              >
+                取消
+              </button>
+              <button
+                onClick={showConfirm.onConfirm}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition duration-150"
+              >
+                確定刪除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
