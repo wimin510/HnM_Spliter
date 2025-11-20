@@ -115,7 +115,7 @@
             return { Modal, show };
         };
 
-        // --- Calculator Component (Unchanged) ---
+        // --- Calculator Component ---
         const CalculatorModal = ({ initialValue, onClose, onOk, showToast }) => {
             const [display, setDisplay] = useState(initialValue || '0');
             const [expression, setExpression] = useState(initialValue || '0');
@@ -137,12 +137,13 @@
                     setIsResult(false);
                 } else {
                     // Append to current expression
-                    const newDisplay = (display === '0' && value !== '.') ? value : display + value;
+                    let newDisplay = (display === '0' && value !== '.') ? value : display + value;
                     let newExpression = expression + value;
                     
                     // Simple logic to prevent leading zero issue on display
                     if (display === '0' && value !== '.') {
                          newExpression = expression.slice(0, expression.length - 1) + value; // Replace the 0
+                         newDisplay = value;
                     }
 
                     setDisplay(newDisplay);
@@ -228,6 +229,7 @@
             const handleOk = () => {
                 let finalResult = handleCalculate();
                 if (typeof finalResult === 'number' && !isNaN(finalResult)) {
+                    // Pass the result string formatted to 2 decimal places to the parent
                     onOk(finalResult.toFixed(2));
                 } else {
                     onClose();
@@ -533,6 +535,7 @@
                         if (tx.splitType === 'EQUAL') {
                             hShare += amountTWD / 2;
                         } else {
+                            // customH and customM are already in transaction's currency, so multiply by rate
                             hShare += Number(tx.customH || 0) * tx.rate;
                         }
                     }
@@ -701,16 +704,21 @@
                     } else if (splitType === 'CUSTOM' && totalAmount > 0) {
                         const currentH = Number(customH || 0);
                         const currentM = Number(customM || 0);
-                        const totalCustom = currentH + currentM;
+                        const totalCustom = Math.round((currentH + currentM) * 100) / 100;
 
+                        // Recalculate if the custom split doesn't match the total or if inputs are empty
                         if (Math.abs(totalCustom - totalAmount) > 0.01) {
                             if (currentH === 0 && currentM === 0) {
                                 setCustomH(totalAmount.toFixed(2));
                                 setCustomM('');
-                            } else if (currentH > 0 && currentM === 0) {
-                                handleCustomHChange(customH);
-                            } else if (currentH === 0 && currentM > 0) {
-                                handleCustomMChange(customM);
+                            } else if (currentM === 0) {
+                                // If M is empty, try to adjust M based on H
+                                const mValue = Math.round((totalAmount - currentH) * 100) / 100;
+                                setCustomM(mValue >= 0 ? mValue.toFixed(2) : '');
+                            } else if (currentH === 0) {
+                                // If H is empty, try to adjust H based on M
+                                const hValue = Math.round((totalAmount - currentM) * 100) / 100;
+                                setCustomH(hValue >= 0 ? hValue.toFixed(2) : '');
                             }
                         }
                     } else if (totalAmount === 0 && splitType !== 'EQUAL') {
@@ -769,10 +777,10 @@
                                     <div className="relative flex-1">
                                         <input 
                                             type="text" 
-                                            readOnly 
+                                            readOnly // 關鍵：防止鍵盤彈出，強制使用自訂計算機
                                             placeholder="0" 
                                             value={amount} 
-                                            onFocus={(e) => openCalculator(setAmount, amount, e)}
+                                            onFocus={(e) => openCalculator(setAmount, amount, e)} // 點擊時開啟計算機
                                             className="w-full text-4xl font-bold text-gray-800 border-b-2 border-gray-200 focus:border-teal-500 outline-none py-2 bg-transparent placeholder-gray-300" 
                                             autoFocus 
                                         />
@@ -1078,13 +1086,14 @@
                     
                     {renderView()}
 
+                    {/* 只有在 isCalcOpen 為 true 時才渲染計算機介面 */}
                     {isCalcOpen && (
                         <CalculatorModal
                             initialValue={calcTarget.initialValue}
-                            onClose={() => setIsCalcOpen(false)}
+                            onClose={() => setIsCalcOpen(false)} // 點擊關閉
                             onOk={(result) => {
-                                calcTarget.setter(result);
-                                setIsCalcOpen(false);
+                                calcTarget.setter(result); // 設定欄位值
+                                setIsCalcOpen(false); // 點擊 OK 後關閉
                             }}
                             showToast={showToast}
                         />
