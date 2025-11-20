@@ -1,502 +1,464 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無賴帳本</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f9fb;
-        }
-        .container {
-            max-width: 900px;
-        }
-        .card {
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-        }
-        .user-id-display {
-            word-break: break-all;
-        }
-    </style>
-</head>
-<body>
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  query, 
+  onSnapshot, 
+  addDoc, 
+  setDoc, 
+  doc,
+  deleteDoc,
+  Timestamp,
+  setLogLevel
+} from 'firebase/firestore';
 
-    <div id="app" class="container mx-auto p-4 md:p-8">
-        <h1 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-6 text-center">
-            無賴帳本 (HnM Splitter)
-        </h1>
+// 確保全域變數存在，以便在 Canvas 環境中運行
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// 定義 Firestore 資料結構的 TypeScript 介面，以提供更好的類型檢查
+/**
+ * @typedef {object} Expense
+ * @property {string} id
+ * @property {string} description
+ * @property {number} amount
+ * @property {string} paidBy
+ * @property {string} sharedWith
+ * @property {number} timestamp
+ */
+
+/**
+ * @typedef {object} UserShare
+ * @property {string} userId
+ * @property {string} name
+ */
+
+// 預設的費用分攤選項
+const SHARING_OPTIONS = [
+  { id: 'all', name: '均攤' },
+  { id: 'me', name: '僅限自己' },
+  // 可以在這裡添加更多選項
+];
+
+// 預設的付款人選項
+const PAID_BY_OPTIONS = [
+  { id: 'me', name: '我' },
+  // 可以在這裡添加其他家庭成員/用戶
+];
+
+const App = () => {
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expenses, setExpenses] = useState([]);
+
+  const [newExpense, setNewExpense] = useState({
+    description: '',
+    amount: '',
+    paidBy: PAID_BY_OPTIONS[0].id,
+    sharedWith: SHARING_OPTIONS[0].id,
+  });
+
+  // 1. Firebase 初始化和認證
+  useEffect(() => {
+    if (!firebaseConfig) {
+      setError("Firebase 設定未提供。請在 Canvas 環境中執行。");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // 設置 Firestore 日誌級別為 Debug 以協助除錯 (建議在開發時開啟)
+      // setLogLevel('debug'); 
+      
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const authInstance = getAuth(app);
+      
+      setDb(firestore);
+      setAuth(authInstance);
+
+      // 設置身份驗證狀態變化的監聽器
+      const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+        if (user) {
+          // 用戶已登入 (無論是使用 Custom Token 還是匿名登入)
+          setUserId(user.uid);
+        } else {
+          // 用戶已登出
+          setUserId(null);
+        }
+        setIsAuthReady(true);
+        setLoading(false);
+      });
+
+      // 處理初始登入 (使用 Custom Token 或匿名登入)
+      const handleSignIn = async () => {
+        try {
+          if (initialAuthToken) {
+            await signInWithCustomToken(authInstance, initialAuthToken);
+          } else {
+            await signInAnonymously(authInstance);
+          }
+        } catch (e) {
+          console.error("Firebase 登入失敗:", e);
+          setError("登入失敗。請檢查 Firebase 專案設定。");
+        }
+      };
+
+      handleSignIn();
+
+      // 清理函數：在元件卸載時取消監聽
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Firebase 初始化失敗:", e);
+      setError(`初始化失敗: ${e.message}`);
+      setLoading(false);
+    }
+  }, []); // 只運行一次
+
+  // 2. 資料庫連線和即時資料監聽 (onSnapshot)
+  useEffect(() => {
+    // 只有在 Firebase 服務和用戶 ID 都準備好後才開始監聽
+    if (!db || !isAuthReady || !userId) {
+      return;
+    }
+
+    // Firestore 路徑： /artifacts/{appId}/public/data/expenses
+    // 這是公共資料路徑，所有用戶共享相同的費用清單
+    const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
+    const q = query(collection(db, expensesCollectionPath));
+
+    // 使用 onSnapshot 實現即時更新
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedExpenses = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      // 按照時間戳記降序排序，最新的費用排在最前面
+      fetchedExpenses.sort((a, b) => b.timestamp - a.timestamp);
+      setExpenses(fetchedExpenses);
+    }, (e) => {
+      console.error("Firestore 連線或監聽失敗:", e);
+      // 發生錯誤時，可能是因為規則不允許讀取。
+      // 但我們已要求使用者設置了開放規則，所以通常是連線問題。
+      setError(`資料讀取失敗: ${e.message}. 請檢查您的 Firestore 安全規則。`);
+    });
+
+    // 清理函數：在 db, isAuthReady 或 userId 變化時取消監聽
+    return () => unsubscribe();
+  }, [db, isAuthReady, userId]);
+
+  // 處理表單輸入變化
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewExpense(prev => ({
+      ...prev,
+      [name]: name === 'amount' ? parseFloat(value) || 0 : value,
+    }));
+  };
+
+  // 將新費用添加到 Firestore
+  const addExpense = useCallback(async () => {
+    if (!db || !userId) {
+      alert("資料庫未準備好或用戶未登入。");
+      return;
+    }
+
+    if (newExpense.description.trim() === '' || newExpense.amount <= 0) {
+      alert("請輸入有效的費用說明和金額。");
+      return;
+    }
+
+    try {
+      const dataToSave = {
+        description: newExpense.description.trim(),
+        amount: newExpense.amount,
+        paidBy: newExpense.paidBy,
+        sharedWith: newExpense.sharedWith,
+        timestamp: Date.now(), // 使用 JavaScript 時間戳記 (毫秒)
+        userId: userId, // 記錄創建此費用的用戶 ID
+        userName: `User ${userId.slice(0, 4)}`, // 簡短的用戶名稱用於顯示
+      };
+
+      const expensesCollectionPath = `artifacts/${appId}/public/data/expenses`;
+      await addDoc(collection(db, expensesCollectionPath), dataToSave);
+
+      // 清除表單
+      setNewExpense({
+        description: '',
+        amount: '',
+        paidBy: PAID_BY_OPTIONS[0].id,
+        sharedWith: SHARING_OPTIONS[0].id,
+      });
+
+    } catch (e) {
+      console.error("新增費用失敗:", e);
+      setError(`新增費用失敗: ${e.message}`);
+    }
+  }, [db, userId, newExpense, appId]);
+
+  // 刪除費用
+  const deleteExpense = useCallback(async (expenseId) => {
+    if (!db) return;
+
+    // 替換原生 confirm()
+    if (!window.confirm('確定要刪除這筆費用嗎？')) {
+      return;
+    }
+
+    try {
+      const expenseDocPath = `artifacts/${appId}/public/data/expenses/${expenseId}`;
+      await deleteDoc(doc(db, expenseDocPath));
+    } catch (e) {
+      console.error("刪除費用失敗:", e);
+      setError(`刪除費用失敗: ${e.message}`);
+    }
+  }, [db, appId]);
+
+
+  // 3. 核心計算邏輯
+  const { totalExpenditure, userOwes, userPaid } = useMemo(() => {
+    let totalExpenditure = 0;
+    let userOwes = 0; // 用戶應負擔的金額
+    let userPaid = 0; // 用戶已支付的金額
+
+    expenses.forEach(expense => {
+      totalExpenditure += expense.amount;
+
+      // 計算用戶已支付
+      if (expense.paidBy === 'me') {
+        userPaid += expense.amount;
+      }
+
+      // 簡化計算：只處理 'all' 和 'me' 的分攤邏輯
+      let shareFactor = 0;
+      if (expense.sharedWith === 'all') {
+        // 假設 'all' 分攤給 2 人 (用戶自己 + 另一個假設的用戶)
+        shareFactor = 1 / 2;
+      } else if (expense.sharedWith === 'me') {
+        shareFactor = 1; // 僅自己負擔
+      }
+      
+      userOwes += expense.amount * shareFactor;
+    });
+
+    // 淨結算：如果為正，表示用戶應收款；如果為負，表示用戶應付款
+    const netBalance = userPaid - userOwes;
+
+    return {
+      totalExpenditure,
+      userOwes,
+      userPaid,
+      netBalance
+    };
+  }, [expenses]);
+
+
+  // 處理載入和錯誤狀態的 UI
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="text-xl font-semibold">載入中... 正在建立 Firebase 連線...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-red-400 p-8">
+        <div className="text-2xl font-bold mb-4">連線錯誤</div>
+        <pre className="bg-gray-800 p-4 rounded-lg text-sm whitespace-pre-wrap max-w-lg">{error}</pre>
+        <p className="mt-4 text-gray-400">請檢查瀏覽器控制台中的詳細錯誤訊息，並確認 Firebase 規則已正確發佈。</p>
+      </div>
+    );
+  }
+
+  // 格式化金額
+  const formatCurrency = (amount) => {
+    return `${amount.toFixed(2)} TWD`;
+  };
+
+  const netBalance = userPaid - userOwes;
+
+  const statusText = isAuthReady && userId 
+    ? "連線狀態：Firestore 已連線"
+    : "連線狀態：初始化錯誤或登入中";
+  
+  const statusColor = isAuthReady && userId ? "text-green-400" : "text-yellow-400";
+
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-white font-sans p-4 sm:p-8">
+      
+      {/* 標題與狀態 */}
+      <header className="max-w-4xl mx-auto mb-8 text-center">
+        <h1 className="text-4xl sm:text-5xl font-extrabold text-indigo-400 tracking-tight">家庭收支分攤計算器 (HnM Splitter)</h1>
+        <p className={`mt-4 text-sm font-medium ${statusColor}`}>
+          {statusText} | 用戶 ID: {userId || 'N/A'}
+        </p>
+        <p className="text-xs text-gray-500 mt-1">
+          此 ID 用於共享資料，請記住或告知您的夥伴。
+        </p>
+      </header>
+
+      {/* 新增費用區塊 */}
+      <section className="max-w-2xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl mb-10">
+        <h2 className="text-2xl font-bold mb-6 text-indigo-300">新增一筆費用</h2>
         
-        <!-- 顯示用戶 ID 和連線狀態 -->
-        <div id="status-card" class="card bg-white p-4 rounded-xl mb-6 border-l-4 border-indigo-500">
-            <p class="text-sm font-semibold text-gray-700">連線狀態: <span id="auth-status" class="text-yellow-600">連線中...</span></p>
-            <p class="text-sm font-semibold text-gray-700 mt-1 user-id-display">用戶ID: <span id="current-user-id" class="text-gray-500 font-mono text-xs">等待驗證...</span></p>
-            <p class="text-xs text-indigo-500 mt-2">此ID用於共享資料，請記住或告知您的夥伴。</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          
+          {/* 費用說明 */}
+          <div className="col-span-1 sm:col-span-2">
+            <label htmlFor="description" className="block text-sm font-medium text-gray-400 mb-1">費用說明 (例如: 晚餐外送)</label>
+            <input
+              type="text"
+              id="description"
+              name="description"
+              value={newExpense.description}
+              onChange={handleInputChange}
+              placeholder="輸入費用說明"
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+            />
+          </div>
+
+          {/* 金額 */}
+          <div>
+            <label htmlFor="amount" className="block text-sm font-medium text-gray-400 mb-1">金額 (TWD)</label>
+            <input
+              type="number"
+              id="amount"
+              name="amount"
+              value={newExpense.amount}
+              onChange={handleInputChange}
+              placeholder="0.00"
+              min="0.01"
+              step="0.01"
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white"
+            />
+          </div>
+          
+          {/* 付款人 */}
+          <div>
+            <label htmlFor="paidBy" className="block text-sm font-medium text-gray-400 mb-1">付款人</label>
+            <select
+              id="paidBy"
+              name="paidBy"
+              value={newExpense.paidBy}
+              onChange={handleInputChange}
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
+            >
+              {PAID_BY_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* 分攤對象 */}
+          <div>
+            <label htmlFor="sharedWith" className="block text-sm font-medium text-gray-400 mb-1">分攤對象</label>
+            <select
+              id="sharedWith"
+              name="sharedWith"
+              value={newExpense.sharedWith}
+              onChange={handleInputChange}
+              className="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-white appearance-none"
+            >
+              {SHARING_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* 送出按鈕 */}
+          <div className="col-span-1 sm:col-span-2 flex justify-end mt-2">
+            <button
+              onClick={addExpense}
+              className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transition duration-200"
+              disabled={newExpense.description.trim() === '' || newExpense.amount <= 0}
+            >
+              新增費用
+            </button>
+          </div>
         </div>
+      </section>
 
-        <!-- 新增費用表單 -->
-        <div class="card bg-white p-6 rounded-xl mb-8">
-            <h2 class="text-xl font-bold mb-4 text-gray-800">新增一筆費用</h2>
-            <form id="expense-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <input type="text" id="description" placeholder="費用說明 (例如: 晚餐外送)" required
-                       class="col-span-1 md:col-span-3 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
-                
-                <input type="number" id="amount" placeholder="金額 (TWD)" required min="0.01" step="0.01"
-                       class="p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
-                
-                <select id="paid-by" required
-                        class="p-3 border border-gray-300 rounded-lg bg-white focus:ring-indigo-500 focus:border-indigo-500">
-                    <option value="" disabled selected>誰支付的？</option>
-                    <option value="user">我 (當前用戶)</option>
-                    <option value="partner">夥伴</option>
-                </select>
+      {/* 結算結果區塊 */}
+      <section className="max-w-4xl mx-auto mb-10 p-6 bg-gray-800 rounded-xl shadow-2xl">
+        <h2 className="text-2xl font-bold mb-6 text-indigo-300">費用明細與結算</h2>
 
-                <select id="split-type" required
-                        class="p-3 border border-gray-300 rounded-lg bg-white focus:ring-indigo-500 focus:border-indigo-500">
-                    <option value="equal">均攤</option>
-                    <option value="user_pays">我負擔</option>
-                    <option value="partner_pays">夥伴負擔</option>
-                </select>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+          <div className="p-4 bg-gray-700 rounded-lg shadow-inner">
+            <p className="text-sm text-gray-400">總支出</p>
+            <p className="text-2xl font-bold text-yellow-300 mt-1">{formatCurrency(totalExpenditure)}</p>
+          </div>
+          <div className="p-4 bg-gray-700 rounded-lg shadow-inner">
+            <p className="text-sm text-gray-400">我的份額 (應付)</p>
+            <p className="text-2xl font-bold text-red-400 mt-1">{formatCurrency(userOwes)}</p>
+          </div>
+          <div className={`p-4 rounded-lg shadow-inner ${netBalance >= 0 ? 'bg-green-800/50' : 'bg-red-800/50'}`}>
+            <p className="text-sm text-gray-300">結算結果</p>
+            <p className="text-2xl font-bold mt-1">
+              {netBalance >= 0 ? 
+                <span className="text-green-400">應收 {formatCurrency(netBalance)}</span> : 
+                <span className="text-red-400">應付 {formatCurrency(Math.abs(netBalance))}</span>
+              }
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 費用清單 */}
+      <section className="max-w-4xl mx-auto p-6 bg-gray-800 rounded-xl shadow-2xl">
+        <h3 className="text-xl font-bold mb-4 text-indigo-300">費用清單 ({expenses.length} 筆)</h3>
+        
+        {expenses.length === 0 ? (
+          <p className="text-gray-400 text-center py-8">目前沒有費用記錄。</p>
+        ) : (
+          <div className="space-y-3">
+            {expenses.map((expense) => (
+              <div 
+                key={expense.id} 
+                className="flex justify-between items-center p-4 bg-gray-700 rounded-lg shadow-md transition duration-150 hover:bg-gray-600"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-lg font-semibold text-white truncate">{expense.description}</p>
+                  <div className="text-sm text-gray-400 space-x-3">
+                    <span className="font-mono">{formatCurrency(expense.amount)}</span>
+                    <span className="text-xs">| 由 <span className="text-indigo-300 font-medium">{PAID_BY_OPTIONS.find(o => o.id === expense.paidBy)?.name || '未知'}</span> 支付</span>
+                    <span className="text-xs">| 分攤給 <span className="text-indigo-300 font-medium">{SHARING_OPTIONS.find(o => o.id === expense.sharedWith)?.name || '未知'}</span></span>
+                  </div>
+                </div>
                 
-                <button type="submit" id="submit-button"
-                        class="col-span-1 md:col-span-3 bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700 transition duration-150 font-semibold shadow-md disabled:bg-indigo-300">
-                    新增費用
+                <button
+                  onClick={() => deleteExpense(expense.id)}
+                  className="ml-4 p-2 text-red-400 hover:text-red-500 rounded-full transition duration-150"
+                  title="刪除費用"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
+                  </svg>
                 </button>
-            </form>
-        </div>
-
-        <!-- 費用列表與總結 -->
-        <div class="card bg-white p-6 rounded-xl">
-            <h2 class="text-xl font-bold mb-4 text-gray-800">費用明細與結算</h2>
-
-            <!-- 總結區塊 -->
-            <div class="grid grid-cols-2 gap-4 mb-6">
-                <div class="p-4 bg-indigo-50 rounded-lg text-center">
-                    <p class="text-sm font-medium text-indigo-600">總支出</p>
-                    <p id="total-spent" class="text-2xl font-bold text-indigo-800 mt-1">0.00 TWD</p>
-                </div>
-                <div id="settlement-summary" class="p-4 rounded-lg text-center transition-colors">
-                    <p class="text-sm font-medium text-gray-600" id="settlement-label">結算結果</p>
-                    <p id="settlement-amount" class="text-2xl font-bold mt-1 text-gray-800">0.00 TWD</p>
-                </div>
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">說明</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">金額</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">支付者</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">我負擔</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">夥伴負擔</th>
-                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="expense-list" class="bg-white divide-y divide-gray-200">
-                        <!-- 費用資料將會被 JavaScript 渲染在這裡 -->
-                        <tr>
-                            <td colspan="6" class="p-4 text-center text-gray-500 italic" id="loading-message">載入中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      
+      {/* 底部浮動按鈕 - 替換原生 alert */}
+      <div id="custom-alert-container"></div>
     </div>
+  );
+};
 
-    <!-- 錯誤/成功訊息彈窗 -->
-    <div id="message-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm">
-            <h3 id="modal-title" class="text-lg font-bold mb-3">訊息</h3>
-            <p id="modal-content" class="text-gray-700 mb-4"></p>
-            <button id="modal-close" class="w-full bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 transition duration-150">確定</button>
-        </div>
-    </div>
-
-    <!-- Main Application Logic (All in one module script) -->
-    <script type="module">
-        // 匯入 Firebase 模組
-        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, addDoc, onSnapshot, collection, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // =========================================================================================
-        // 📌 [外部連線配置]：這是您提供的 hnm-splitter 專案配置。
-        // 🚨 警示: 這是一個公開的配置，請確保您的 Firestore 安全規則已設定，
-        // 僅允許已驗證的使用者讀寫資料，因為外部環境一律使用匿名登入 (signInAnonymously)
-        const EXTERNAL_FIREBASE_CONFIG = {
-            apiKey: "AIzaSyCRHx0I02nojkn5-y5HXS3P3i1jA5SEy8E",
-            authDomain: "hnm-splitter.firebaseapp.com", 
-            projectId: "hnm-splitter", 
-            storageBucket: "hnm-splitter.appspot.com",
-            messagingSenderId: "514297368344",
-            appId: "1:514297368344:web:a9ee0cb370cddc1b6e986d"
-            // measurementId: "G-4DY12810X8" (分析 ID，在此應用程式中不需要)
-        };
-        // =========================================================================================
-
-        // 全域變數
-        let db = null;
-        let auth = null;
-        let userId = 'loading';
-        let authReady = false;
-        let isCanvasEnvironment = false; // 旗標，判斷是否為 Canvas 環境
-
-        // 全域 helper 函式：顯示自訂訊息視窗 (取代 alert/confirm)
-        function showMessage(title, content) {
-            const modal = document.getElementById('message-modal');
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-content').textContent = content;
-            modal.classList.remove('hidden');
-
-            document.getElementById('modal-close').onclick = () => {
-                modal.classList.add('hidden');
-            };
-        }
-
-        // 函式：計算並更新結算總結
-        function updateSettlement(expenses) {
-            let userPaidTotal = 0;
-            let partnerPaidTotal = 0;
-            let userOwed = 0;
-            let partnerOwed = 0;
-
-            expenses.forEach(exp => {
-                if (exp.paidBy === 'user') {
-                    userPaidTotal += exp.amount;
-                } else if (exp.paidBy === 'partner') {
-                    partnerPaidTotal += exp.amount;
-                }
-
-                if (exp.splitType === 'equal') {
-                    const half = exp.amount / 2;
-                    userOwed += half;
-                    partnerOwed += half;
-                } else if (exp.splitType === 'user_pays') {
-                    userOwed += exp.amount;
-                } else if (exp.splitType === 'partner_pays') {
-                    partnerOwed += exp.amount;
-                }
-            });
-
-            const totalSpent = userPaidTotal + partnerPaidTotal;
-            document.getElementById('total-spent').textContent = `${totalSpent.toFixed(2)} TWD`;
-
-            // 計算淨餘額： (我支付的) - (我應負擔的)
-            const netBalance = userPaidTotal - userOwed; // 正值：我多付了 (夥伴欠我)；負值：我少付了 (我欠夥伴)
-
-            const summaryEl = document.getElementById('settlement-summary');
-            const labelEl = document.getElementById('settlement-label');
-            const amountEl = document.getElementById('settlement-amount');
-
-            // 移除舊的顏色類別
-            summaryEl.className = summaryEl.className.replace(/bg-\w+-100|border-\w+-600|bg-gray-100/g, '').trim();
-            amountEl.classList.remove('text-green-800', 'text-red-800', 'text-gray-800');
-            amountEl.classList.add('text-2xl', 'font-bold', 'mt-1'); // 確保基礎樣式存在
-
-            if (netBalance > 0.01) {
-                labelEl.textContent = '夥伴應付我 (多付了)';
-                amountEl.textContent = `${Math.abs(netBalance).toFixed(2)} TWD`;
-                summaryEl.classList.add('bg-green-100', 'border-l-4', 'border-green-600');
-                amountEl.classList.add('text-green-800');
-            } else if (netBalance < -0.01) {
-                labelEl.textContent = '我應付夥伴 (少付了)';
-                amountEl.textContent = `${Math.abs(netBalance).toFixed(2)} TWD`;
-                summaryEl.classList.add('bg-red-100', 'border-l-4', 'border-red-600');
-                amountEl.classList.add('text-red-800');
-            } else {
-                labelEl.textContent = '結算結果';
-                amountEl.textContent = '已結清 (0.00 TWD)';
-                summaryEl.classList.add('bg-gray-100', 'border-l-4', 'border-gray-300'); // 保持樣式一致
-                amountEl.classList.add('text-gray-800');
-            }
-        }
-
-        // 函式：刪除費用
-        async function deleteExpense(docId) {
-            if (!authReady || !db) {
-                showMessage("錯誤", "資料庫連線離線或尚未準備好。");
-                return;
-            }
-            try {
-                // 根據環境切換 collection path
-                const appId = isCanvasEnvironment ? __app_id : EXTERNAL_FIREBASE_CONFIG.projectId;
-                const docRef = doc(db, 
-                    `artifacts/${appId}/public/data/expenses`, docId);
-                await deleteDoc(docRef);
-            } catch (error) {
-                console.error("刪除費用失敗: ", error);
-                showMessage("錯誤", "刪除資料失敗，請檢查權限或連線。");
-            }
-        }
-
-
-        // 函式：渲染費用列表
-        function renderExpenseList(expenses) {
-            const listEl = document.getElementById('expense-list');
-            listEl.innerHTML = '';
-
-            if (expenses.length === 0) {
-                listEl.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-gray-500">目前沒有費用記錄。</td></tr>`;
-                return;
-            }
-
-            expenses.forEach(exp => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-gray-50';
-                
-                let userSplit = 0;
-                let partnerSplit = 0;
-
-                if (exp.splitType === 'equal') {
-                    userSplit = exp.amount / 2;
-                    partnerSplit = exp.amount / 2;
-                } else if (exp.splitType === 'user_pays') {
-                    userSplit = exp.amount;
-                } else if (exp.splitType === 'partner_pays') {
-                    partnerSplit = exp.amount;
-                }
-                
-                tr.innerHTML = `
-                    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-900">${exp.description}</td>
-                    <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${exp.amount.toFixed(2)}</td>
-                    <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">
-                        ${exp.paidBy === 'user' ? '我' : '夥伴'}
-                    </td>
-                    <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-700">
-                        ${userSplit.toFixed(2)}
-                    </td>
-                    <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-700">
-                        ${partnerSplit.toFixed(2)}
-                    </td>
-                    <td class="px-3 py-3 whitespace-nowrap text-right text-sm font-medium">
-                        <button class="text-red-600 hover:text-red-900 transition duration-150 delete-btn" 
-                                data-id="${exp.id}">
-                            刪除
-                        </button>
-                    </td>
-                `;
-                listEl.appendChild(tr);
-            });
-
-            listEl.querySelectorAll('.delete-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const docId = e.target.getAttribute('data-id');
-                    deleteExpense(docId);
-                });
-            });
-        }
-
-        // 函式：訂閱並即時載入資料
-        function loadData() {
-            if (!authReady || userId === 'loading' || !db) {
-                document.getElementById('loading-message').textContent = '等待身份驗證完成...';
-                return;
-            }
-
-            document.getElementById('loading-message').classList.add('hidden');
-            const authStatusEl = document.getElementById('auth-status');
-            authStatusEl.textContent = '連線成功 (即時)';
-            authStatusEl.classList.remove('text-yellow-600', 'text-red-600', 'text-orange-500', 'text-indigo-600');
-            authStatusEl.classList.add('text-green-600');
-            
-            // 根據環境設定 Collection Path
-            const appId = isCanvasEnvironment ? __app_id : EXTERNAL_FIREBASE_CONFIG.projectId;
-            const collectionPath = `artifacts/${appId}/public/data/expenses`;
-            
-            const unsubscribe = onSnapshot(
-                collection(db, collectionPath),
-                (snapshot) => {
-                    const expenses = [];
-                    snapshot.forEach(doc => {
-                        expenses.push({ id: doc.id, ...doc.data() });
-                    });
-                    
-                    expenses.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); 
-                    
-                    renderExpenseList(expenses);
-                    updateSettlement(expenses);
-                },
-                (error) => {
-                    console.error("Firestore 即時監聽失敗 (錯誤可能來自權限): ", error);
-                    authStatusEl.textContent = '連線錯誤 (請檢查控制台)';
-                    authStatusEl.classList.remove('text-green-600');
-                    authStatusEl.classList.add('text-red-600');
-                    showMessage("連線錯誤", "資料載入失敗，請查看控制台 (Console) 了解詳細錯誤。");
-                }
-            );
-
-            return unsubscribe;
-        }
-
-        // 函式：新增費用
-        async function addExpense(e) {
-            e.preventDefault();
-
-            if (!authReady || !db) {
-                showMessage("錯誤", "資料庫連線離線或尚未準備好，請稍候再試。");
-                return;
-            }
-
-            const form = e.target;
-            const description = form.description.value.trim();
-            const amount = parseFloat(form.amount.value);
-            const paidBy = form['paid-by'].value;
-            const splitType = form['split-type'].value;
-
-            if (description === "" || isNaN(amount) || amount <= 0 || paidBy === "") {
-                showMessage("輸入錯誤", "請確保所有欄位都已正確填寫。");
-                return;
-            }
-
-            const newExpense = {
-                description,
-                amount,
-                paidBy,
-                splitType,
-                createdAt: Date.now(),
-                createdBy: userId, 
-            };
-
-            try {
-                // 根據環境設定 Collection Path
-                const appId = isCanvasEnvironment ? __app_id : EXTERNAL_FIREBASE_CONFIG.projectId;
-                const collectionPath = `artifacts/${appId}/public/data/expenses`;
-                await addDoc(collection(db, collectionPath), newExpense);
-
-                form.reset();
-                form['paid-by'].value = "";
-            } catch (error) {
-                console.error("新增費用失敗: ", error);
-                showMessage("錯誤", "新增資料失敗，請檢查權限或連線。");
-            }
-        }
-
-        // 函式：檢查外部配置是否已填寫
-        function isExternalConfigValid() {
-            // 檢查關鍵欄位是否已從預留字串替換為實際值
-            return EXTERNAL_FIREBASE_CONFIG.apiKey.length > 10 &&
-                   EXTERNAL_FIREBASE_CONFIG.appId.length > 10;
-        }
-
-        // 啟動應用程式的主函式
-        function initApp() {
-            const authStatusEl = document.getElementById('auth-status');
-            const currentUserIdEl = document.getElementById('current-user-id');
-            const submitButton = document.getElementById('submit-button');
-            const loadingMessageEl = document.getElementById('loading-message');
-            
-            // 檢查 Canvas 環境變數是否存在
-            const hasCanvasEnvironment = typeof window.__firebase_config !== 'undefined' && typeof window.__app_id !== 'undefined';
-            isCanvasEnvironment = hasCanvasEnvironment; // 設定環境旗標
-
-            let configToUse;
-            let initialAuthToken = null;
-            let displayMode = '';
-            
-            if (isCanvasEnvironment) {
-                // 模式 1: Canvas 環境
-                try {
-                    configToUse = JSON.parse(__firebase_config);
-                    initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                    displayMode = 'Canvas 環境 (安全認證)';
-                    authStatusEl.classList.add('text-yellow-600');
-                } catch (e) {
-                    // 如果解析失敗，則視為外部環境
-                    isCanvasEnvironment = false; 
-                    console.error("解析 Canvas 配置失敗:", e);
-                }
-            }
-            
-            if (!isCanvasEnvironment) {
-                // 模式 2: 外部環境 (例如 GitHub Pages)
-                if (!isExternalConfigValid()) {
-                    // 如果配置仍是預留位置，則進入離線模式
-                    authStatusEl.textContent = '外部模式 (Firestore 離線)';
-                    authStatusEl.classList.remove('text-yellow-600', 'text-indigo-600');
-                    authStatusEl.classList.add('text-orange-500');
-                    currentUserIdEl.textContent = 'N/A (請在 Canvas 中預覽或檢查外部配置)';
-                    loadingMessageEl.textContent = '資料庫功能已禁用，請檢查外部配置是否完整填寫。';
-                    submitButton.disabled = true;
-                    submitButton.textContent = '新增費用 (離線)';
-                    
-                    // 顯示警告 modal
-                    setTimeout(() => {
-                        if (document.getElementById('message-modal').classList.contains('hidden')) {
-                            showMessage(
-                                "連線警告 - 外部環境",
-                                "您正在 Canvas 外部執行。請確認程式碼頂部 **EXTERNAL_FIREBASE_CONFIG** 已填寫正確的 API Key 和 App ID。"
-                            );
-                        }
-                    }, 500);
-                    return;
-                } else {
-                    // 如果配置已填寫，使用外部配置
-                    configToUse = EXTERNAL_FIREBASE_CONFIG;
-                    displayMode = '外部環境 (匿名連線)';
-                    authStatusEl.classList.add('text-indigo-600');
-                    authStatusEl.classList.remove('text-yellow-600');
-                }
-            }
-
-
-            // 開始初始化 Firebase
-            try {
-                setLogLevel('debug'); 
-                const app = initializeApp(configToUse);
-                auth = getAuth(app);
-                db = getFirestore(app);
-                
-                authStatusEl.textContent = displayMode;
-
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        authReady = true;
-                        currentUserIdEl.textContent = userId;
-                        loadData(); // 登入成功後才開始載入資料
-
-                    } else {
-                        // 處理登入邏輯 (根據環境決定)
-                        if (isCanvasEnvironment && initialAuthToken) {
-                            // Canvas: 嘗試使用 Custom Token 登入
-                            signInWithCustomToken(auth, initialAuthToken)
-                                .catch(error => {
-                                    console.error("Custom Token 登入失敗, 轉為匿名登入:", error);
-                                    signInAnonymously(auth).catch(anonError => {
-                                        console.error("匿名登入也失敗:", anonError);
-                                        authStatusEl.textContent = '連線失敗 (登入)';
-                                        authStatusEl.classList.add('text-red-600');
-                                    });
-                                });
-                        } else {
-                            // 外部環境 (或 Canvas 但沒有 Token): 匿名登入
-                             signInAnonymously(auth).catch(error => {
-                                console.error("匿名登入失敗:", error);
-                                authStatusEl.textContent = '連線失敗 (匿名登入)';
-                                authStatusEl.classList.add('text-red-600');
-                            });
-                        }
-                    }
-                });
-
-                document.getElementById('expense-form').addEventListener('submit', addExpense);
-
-            } catch (error) {
-                console.error("應用程式初始化失敗:", error);
-                authStatusEl.textContent = '初始化錯誤';
-                authStatusEl.classList.remove('text-yellow-600', 'text-indigo-600');
-                authStatusEl.classList.add('text-red-600');
-                showMessage("嚴重錯誤", "應用程式初始化失敗，請檢查控制台的錯誤訊息。");
-            }
-        }
-
-        window.onload = initApp;
-
-    </script>
-
-</body>
-</html>
+export default App;
