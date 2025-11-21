@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" class="bg-slate-50">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無賴帳本 HnM Spliter</title>
+    <title>無賴帳本 HnM Spliter v0.4</title>
     <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 設置字體 -->
+    <!-- 設置字體：改用圓體 (Zen Maru Gothic) -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap');
         body {
-            font-family: 'Noto Sans TC', sans-serif;
-            background-color: #f3f4f6; /* gray-100 */
+            /* 使用圓體，若載入失敗則回退到系統無襯線體 */
+            font-family: 'Zen Maru Gothic', 'Helvetica Neue', sans-serif;
         }
         /* 隱藏滾動條但保留功能 */
         .no-scrollbar::-webkit-scrollbar {
@@ -21,187 +21,271 @@
             -ms-overflow-style: none;  /* IE and Edge */
             scrollbar-width: none;  /* Firefox */
         }
+        /* 自定義柔和陰影 */
+        .soft-shadow {
+            box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -2px rgba(0, 0, 0, 0.02);
+        }
     </style>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        primary: '#4f46e5',   // indigo-600
-                        secondary: '#10b981', // emerald-500 (優勢/被欠錢)
-                        danger: '#ef4444',    // red-500 (劣勢/欠錢)
-                        warning: '#f59e0b',   // amber-500
+                        // 低飽和度配色方案
+                        slate: {
+                            850: '#1e293b', // 更深的背景色
+                        },
+                        primary: {
+                            DEFAULT: '#475569', // Slate-600 (主按鈕)
+                            dark: '#334155',    // Slate-700 (Hover)
+                        },
+                        accent: {
+                            teal: '#2dd4bf',    // 柔和青綠 (優勢)
+                            rose: '#fb7185',    // 柔和玫瑰紅 (劣勢)
+                            blue: '#93c5fd',    // 柔和藍 (H)
+                            orange: '#fdba74',  // 柔和橘 (M)
+                        }
+                    },
+                    boxShadow: {
+                        'soft-xl': '0 20px 25px -5px rgb(0 0 0 / 0.05), 0 8px 10px -6px rgb(0 0 0 / 0.02)',
                     }
                 }
             }
         }
     </script>
 </head>
-<body class="p-4 sm:p-6 min-h-screen flex justify-center items-start">
+<body class="p-4 sm:p-6 min-h-screen flex justify-center items-start text-slate-700">
 
-    <div class="w-full max-w-lg space-y-6">
+    <div class="w-full max-w-[500px] space-y-6 my-4">
         
         <!-- 標題與連線狀態 -->
-        <div class="flex justify-between items-end px-1">
-            <h1 class="text-3xl font-bold text-gray-800 tracking-tight">無賴帳本 <span class="text-2xl">🤡</span></h1>
-            <div class="text-right">
-                <div class="flex items-center justify-end space-x-1">
-                    <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></div>
-                    <span id="connection-status" class="text-xs font-medium text-gray-500">連線中...</span>
+        <div class="flex justify-between items-end px-2">
+            <div>
+                 <h1 class="text-3xl font-black text-slate-800 tracking-tight flex items-center">
+                    無賴帳本 <span class="text-xl ml-2 opacity-50">v0.4</span>
+                </h1>
+                <p class="text-xs text-slate-400 font-medium mt-1">圓體中性版</p>
+            </div>
+           
+            <div class="text-right flex flex-col items-end">
+                <div class="inline-flex items-center bg-white py-1 px-2 rounded-full shadow-sm border border-slate-100">
+                    <div id="status-dot" class="w-2 h-2 rounded-full bg-slate-300 animate-pulse mr-2"></div>
+                    <span id="connection-status" class="text-xs font-bold text-slate-500">連線中...</span>
                 </div>
-                <div id="user-id" class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ---</div>
+                <div id="user-id" class="text-[10px] text-slate-400 font-mono mt-1 mr-1">ID: ---</div>
             </div>
         </div>
 
-        <!-- 總欠款卡片 (最醒目) -->
-        <div id="balance-card" class="relative overflow-hidden bg-gradient-to-br from-gray-700 to-gray-900 rounded-2xl shadow-xl p-6 text-white transition-all duration-500">
-            <div class="relative z-10">
-                <p class="text-sm opacity-80 font-medium mb-1">目前狀態</p>
-                <h2 id="balance-status-text" class="text-lg font-bold mb-2">載入中...</h2>
-                <div class="flex items-baseline space-x-2">
-                    <span class="text-4xl font-extrabold tracking-tight" id="balance-amount">---</span>
-                    <span class="text-sm font-medium opacity-75">TWD</span>
+        <!-- 總欠款卡片 (加入結清按鈕) -->
+        <div id="balance-card" class="relative overflow-hidden bg-slate-850 rounded-[2rem] shadow-soft-xl p-8 text-white transition-all duration-500 group">
+            <!-- 狀態指示燈條 (左側) -->
+            <div id="balance-indicator-bar" class="absolute left-0 top-0 bottom-0 w-2 bg-slate-700 transition-colors duration-500"></div>
+            
+            <div class="relative z-10 pl-4">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <p class="text-sm font-medium text-slate-400 mb-1 tracking-wider uppercase">Current Status</p>
+                        <h2 id="balance-status-text" class="text-xl font-bold flex items-center">
+                            <span id="status-icon" class="mr-2 text-2xl">⚖️</span>
+                            <span>載入中...</span>
+                        </h2>
+                    </div>
+                    <!-- 匯率小工具 -->
+                    <div class="text-right bg-slate-800/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 text-xs text-slate-300">
+                         <div id="rates-display" class="space-y-0.5 font-mono opacity-80">
+                            <div class="flex items-center gap-1"><span class="text-slate-500">🇺🇸</span> <span>---</span></div>
+                            <div class="flex items-center gap-1"><span class="text-slate-500">🇯🇵</span> <span>---</span></div>
+                        </div>
+                    </div>
                 </div>
-                <p class="text-xs mt-4 opacity-60 border-t border-white/20 pt-2">
-                    * 所有外幣交易皆已依當下匯率換算為新台幣結算
+                
+                <div class="flex items-baseline mt-6">
+                    <span class="text-5xl font-black tracking-tighter tabular-nums" id="balance-amount">---</span>
+                    <span class="text-lg font-bold ml-2 text-slate-400">TWD</span>
+                </div>
+                 <p class="text-[10px] mt-6 text-slate-500 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3 mr-1 inline opacity-70"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 002 0v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" /></svg>
+                    外幣已依即時匯率換算為新台幣
                 </p>
+
+                <!-- 結清按鈕 (新增) -->
+                <button id="clear-balance-btn" class="absolute bottom-6 right-8 text-white bg-slate-600 hover:bg-slate-700 font-bold py-2 px-4 rounded-full text-sm transition-all shadow-md disabled:opacity-30 disabled:cursor-not-allowed transform translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100" disabled>
+                    🤝 一鍵結清
+                </button>
             </div>
-            <!-- 背景裝飾 -->
-            <div class="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
-            <div class="absolute bottom-0 left-0 -ml-8 -mb-8 w-24 h-24 bg-white opacity-10 rounded-full blur-2xl"></div>
+            <!-- 背景裝飾 (更柔和) -->
+            <div class="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-gradient-to-br from-white/5 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+            <div id="balance-glow" class="absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-slate-700/20 rounded-full blur-3xl pointer-events-none transition-colors duration-500"></div>
         </div>
 
-        <!-- 匯率資訊跑馬燈 -->
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex items-center justify-between text-sm">
-            <span class="font-bold text-gray-600 mr-2">今日匯率:</span>
-            <div id="rates-display" class="flex-1 text-right text-gray-500 font-mono">
-                載入中...
-            </div>
-        </div>
 
-        <!-- 設定區塊 (收合式) -->
-        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <button id="toggle-settings" class="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
-                <span class="font-bold text-gray-700">⚙️ 設定成員名稱</span>
-                <svg id="settings-icon" class="w-5 h-5 text-gray-500 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        <!-- 設定區塊 -->
+        <div class="bg-white rounded-2xl soft-shadow border border-slate-100 overflow-hidden">
+            <button id="toggle-settings" class="w-full flex justify-between items-center p-4 px-6 hover:bg-slate-50 transition-colors group">
+                <span class="font-bold text-slate-700 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2 text-slate-400 group-hover:text-slate-600 transition-colors"><path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM15.657 14.596a.75.75 0 01-1.06 1.06l-1.061-1.06a.75.75 0 011.06-1.06l1.06 1.06zM6.464 5.404a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 011.06-1.06l1.06 1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10z" /></svg>
+                    成員名稱設定
+                </span>
+                <svg id="settings-icon" class="w-5 h-5 text-slate-400 transform transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
             </button>
-            <div id="settings-panel" class="hidden p-4 space-y-4 border-t border-gray-200">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">代號 H</label>
-                        <input type="text" id="h-name-input" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none" placeholder="例如: 小明">
+            <div id="settings-panel" class="hidden p-6 pt-2 space-y-6 border-t border-slate-100 bg-slate-50/50">
+                <div class="grid grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">成員 H (名稱)</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <span class="text-accent-blue/80 font-bold">H</span>
+                            </div>
+                            <input type="text" id="h-name-input" class="block w-full pl-8 pr-3 py-3 bg-white border-0 rounded-xl shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-accent-blue sm:text-sm transition-shadow" placeholder="輸入名稱...">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">代號 M</label>
-                        <input type="text" id="m-name-input" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none" placeholder="例如: 小美">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">成員 M (名稱)</label>
+                        <div class="relative">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <span class="text-accent-orange/80 font-bold">M</span>
+                            </div>
+                            <input type="text" id="m-name-input" class="block w-full pl-8 pr-3 py-3 bg-white border-0 rounded-xl shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-accent-orange sm:text-sm transition-shadow" placeholder="輸入名稱...">
+                        </div>
                     </div>
                 </div>
-                <button id="save-names-btn" class="w-full py-2 bg-gray-800 text-white text-sm font-bold rounded-lg hover:bg-gray-900 transition-colors">儲存名稱</button>
+                <button id="save-names-btn" class="w-full py-3 bg-slate-800 text-white text-sm font-bold rounded-xl shadow-md hover:bg-slate-900 hover:shadow-lg transition-all active:scale-[0.98]">儲存設定</button>
             </div>
         </div>
 
-        <!-- 新增紀錄表單 -->
-        <div class="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                <span class="bg-primary text-white rounded-full w-6 h-6 flex items-center justify-center text-xs mr-2">+</span>
-                新增紀錄
+        <!-- 新增紀錄表單 (主要操作區) -->
+        <div class="bg-white rounded-[2rem] soft-shadow border border-slate-100 p-6 sm:p-8 relative overflow-hidden">
+            <!-- 裝飾背景 -->
+            <div class="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-full -mr-32 -mt-32 pointer-events-none opacity-50"></div>
+
+            <h3 class="text-xl font-black text-slate-800 mb-8 flex items-center relative z-10">
+                <span class="bg-slate-800 text-white rounded-xl w-8 h-8 flex items-center justify-center text-lg mr-3 shadow-sm">📝</span>
+                記上一筆
             </h3>
             
-            <form id="expense-form" class="space-y-4">
-                <!-- 1. 日期與幣別 -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">日期</label>
-                        <input type="date" id="recordDate" required class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none">
+            <form id="expense-form" class="space-y-8 relative z-10">
+                
+                <!-- 1. 誰付的 (頭像式選擇器 - 重點修改) -->
+                <div class="space-y-3">
+                    <label class="block text-sm font-bold text-slate-700">誰先付的錢？</label>
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- H 選項 -->
+                        <label class="relative cursor-pointer group">
+                            <input type="radio" name="payer" value="H" class="peer sr-only" checked>
+                            <div class="flex flex-col items-center p-4 rounded-2xl border-2 border-slate-100 bg-white transition-all duration-300 group-hover:border-accent-blue/30 peer-checked:border-accent-blue peer-checked:bg-accent-blue/10 peer-checked:shadow-md">
+                                <div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-2xl font-black text-slate-400 mb-3 transition-colors peer-checked:bg-accent-blue peer-checked:text-white ring-4 ring-white peer-checked:ring-accent-blue/20">
+                                    H
+                                </div>
+                                <span id="payer-h-label" class="font-bold text-slate-600 peer-checked:text-slate-800">成員 H</span>
+                            </div>
+                            <!-- 選中標記 -->
+                            <div class="absolute top-2 right-2 opacity-0 peer-checked:opacity-100 transition-opacity text-accent-blue bg-white rounded-full p-0.5 shadow-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                            </div>
+                        </label>
+
+                        <!-- M 選項 -->
+                        <label class="relative cursor-pointer group">
+                            <input type="radio" name="payer" value="M" class="peer sr-only">
+                            <div class="flex flex-col items-center p-4 rounded-2xl border-2 border-slate-100 bg-white transition-all duration-300 group-hover:border-accent-orange/30 peer-checked:border-accent-orange peer-checked:bg-accent-orange/10 peer-checked:shadow-md">
+                                <div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-2xl font-black text-slate-400 mb-3 transition-colors peer-checked:bg-accent-orange peer-checked:text-white ring-4 ring-white peer-checked:ring-accent-orange/20">
+                                    M
+                                </div>
+                                <span id="payer-m-label" class="font-bold text-slate-600 peer-checked:text-slate-800">成員 M</span>
+                            </div>
+                             <!-- 選中標記 -->
+                             <div class="absolute top-2 right-2 opacity-0 peer-checked:opacity-100 transition-opacity text-accent-orange bg-white rounded-full p-0.5 shadow-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                            </div>
+                        </label>
                     </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">幣別</label>
-                        <select id="currency" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none">
-                            <option value="TWD">🇹🇼 TWD</option>
-                            <option value="JPY">🇯🇵 JPY</option>
-                            <option value="USD">🇺🇸 USD</option>
+                </div>
+
+                <!-- 2. 總金額 (更醒目) -->
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-2">總金額</label>
+                    <div class="relative rounded-2xl shadow-sm overflow-hidden ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-primary transition-shadow">
+                        <input type="number" id="totalAmount" step="0.01" min="0" required class="block w-full p-4 pl-6 text-3xl font-black tracking-tight text-slate-800 bg-white border-0 focus:ring-0 placeholder:text-slate-300" placeholder="0.00">
+                        <div class="absolute inset-y-0 right-0 flex items-center pr-2">
+                             <select id="currency" class="h-full py-0 pl-3 pr-8 border-0 bg-slate-50 text-slate-700 font-bold rounded-xl focus:ring-0 cursor-pointer hover:bg-slate-100 transition-colors sm:text-sm ml-2">
+                                <option value="TWD">🇹🇼 TWD</option>
+                                <option value="JPY">🇯🇵 JPY</option>
+                                <option value="USD">🇺🇸 USD</option>
+                            </select>
+                        </div>
+                         <div class="absolute inset-y-0 right-[6.5rem] flex items-center pointer-events-none">
+                             <span id="currency-label" class="text-slate-400 font-bold text-sm">TWD</span>
+                         </div>
+                    </div>
+                </div>
+
+                <!-- 3. 用途與日期 -->
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="col-span-2 space-y-2">
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">用途 / 描述</label>
+                        <input type="text" id="description" required class="block w-full p-3 bg-white border-0 rounded-xl shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-primary sm:text-sm transition-shadow" placeholder="例如: 晚餐、超市採購">
+                    </div>
+                     <div class="space-y-2">
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">日期</label>
+                        <input type="date" id="recordDate" required class="block w-full p-3 bg-white border-0 rounded-xl shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-primary sm:text-sm transition-shadow text-center">
+                    </div>
+                </div>
+
+                <!-- 4. 分帳方式 -->
+                <div class="pt-2">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-sm font-bold text-slate-700">分帳方式</label>
+                        <select id="splitType" class="p-2 pl-3 pr-8 bg-slate-50 border-0 rounded-lg text-sm font-bold text-slate-600 focus:ring-2 focus:ring-primary cursor-pointer hover:bg-slate-100 transition-colors">
+                            <option value="equal">⚖️ 平均分攤</option>
+                            <option value="custom">✍️ 自訂金額</option>
                         </select>
                     </div>
-                </div>
-
-                <!-- 2. 總金額 -->
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">總金額</label>
-                    <div class="relative">
-                        <input type="number" id="totalAmount" step="0.01" min="0" required class="w-full p-3 pl-4 text-lg font-mono bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" placeholder="0.00">
-                        <span id="currency-label" class="absolute right-4 top-3.5 text-gray-400 text-sm font-bold">TWD</span>
-                    </div>
-                </div>
-
-                <!-- 3. 誰付的 -->
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">誰先付的錢？</label>
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="cursor-pointer">
-                            <input type="radio" name="payer" value="H" class="peer sr-only" checked>
-                            <div class="p-2 text-center rounded-lg border border-gray-200 peer-checked:bg-primary peer-checked:text-white peer-checked:border-primary transition-all">
-                                <span id="payer-h-label">我 (H)</span>
-                            </div>
-                        </label>
-                        <label class="cursor-pointer">
-                            <input type="radio" name="payer" value="M" class="peer sr-only">
-                            <div class="p-2 text-center rounded-lg border border-gray-200 peer-checked:bg-primary peer-checked:text-white peer-checked:border-primary transition-all">
-                                <span id="payer-m-label">夥伴 (M)</span>
-                            </div>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- 4. 用途 -->
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">用途 / 描述</label>
-                    <input type="text" id="description" required class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none" placeholder="例如: 晚餐、超市採購">
-                </div>
-
-                <!-- 5. 分帳方式 -->
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-1">分帳方式</label>
-                    <select id="splitType" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none mb-2">
-                        <option value="equal">⚖️ 平均分攤 (一人一半)</option>
-                        <option value="custom">✍️ 自訂金額</option>
-                    </select>
                     
                     <!-- 自訂金額輸入區 -->
-                    <div id="custom-split-area" class="hidden bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-2">
-                        <div class="flex items-center space-x-2">
-                            <label class="w-1/3 text-sm text-gray-600 truncate" id="split-h-label">H 應付</label>
-                            <input type="number" id="amountH" step="0.01" class="flex-1 p-1.5 border rounded text-right" placeholder="0">
+                    <div id="custom-split-area" class="hidden bg-slate-50/80 p-4 rounded-2xl border border-slate-200/50 space-y-3 mt-3 backdrop-blur-sm">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-8 h-8 rounded-full bg-accent-blue/20 flex items-center justify-center text-accent-blue font-bold text-sm">H</div>
+                            <label class="w-1/3 text-sm font-bold text-slate-600 truncate" id="split-h-label">H 應付</label>
+                            <input type="number" id="amountH" step="0.01" class="flex-1 p-2 border-0 ring-1 ring-slate-200 rounded-lg text-right font-bold text-slate-700 focus:ring-2 focus:ring-accent-blue" placeholder="0.00">
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <label class="w-1/3 text-sm text-gray-600 truncate" id="split-m-label">M 應付</label>
-                            <input type="number" id="amountM" step="0.01" class="flex-1 p-1.5 border rounded text-right" placeholder="0">
+                        <div class="flex items-center space-x-3">
+                             <div class="w-8 h-8 rounded-full bg-accent-orange/20 flex items-center justify-center text-accent-orange font-bold text-sm">M</div>
+                            <label class="w-1/3 text-sm font-bold text-slate-600 truncate" id="split-m-label">M 應付</label>
+                            <input type="number" id="amountM" step="0.01" class="flex-1 p-2 border-0 ring-1 ring-slate-200 rounded-lg text-right font-bold text-slate-700 focus:ring-2 focus:ring-accent-orange" placeholder="0.00">
                         </div>
                     </div>
                 </div>
 
-                <button type="submit" id="submit-btn" class="w-full py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 transform active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                    儲存紀錄
+                <button type="submit" id="submit-btn" class="w-full py-4 bg-primary text-white font-black text-lg rounded-2xl shadow-lg shadow-slate-300/50 hover:bg-primary-dark hover:shadow-xl hover:-translate-y-0.5 transform active:scale-[0.98] active:translate-y-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-lg">
+                    確認儲存紀錄
                 </button>
             </form>
         </div>
 
-        <!-- 最近紀錄 -->
-        <div>
-            <h3 class="text-lg font-bold text-gray-700 mb-3 px-1">最近 5 筆紀錄</h3>
+        <!-- 最近紀錄 (樣式優化) -->
+        <div class="pt-4">
+            <h3 class="text-lg font-black text-slate-700 mb-4 px-2 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 mr-2 opacity-60"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd" /></svg>
+                最近 5 筆紀錄
+            </h3>
             <div id="records-list" class="space-y-3 pb-10">
                 <!-- 紀錄項目會動態插入這裡 -->
-                <div class="text-center text-gray-400 py-4 text-sm">載入中...</div>
+                <div class="text-center text-slate-400 py-8 text-sm font-medium bg-white rounded-2xl border border-dashed border-slate-200">載入中...</div>
             </div>
         </div>
 
     </div>
 
-    <!-- 提示框 Modal -->
-    <div id="modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 backdrop-blur-sm">
-        <div class="bg-white p-6 rounded-2xl shadow-2xl w-80 max-w-full mx-4 transform transition-all scale-100">
-            <h3 id="modal-title" class="text-lg font-bold text-gray-800 mb-2">提示</h3>
-            <p id="modal-msg" class="text-sm text-gray-600 mb-6">訊息內容</p>
-            <button onclick="closeModal()" class="w-full py-2 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-900">知道了</button>
+    <!-- 提示框 Modal (樣式統一，新增 action 按鈕) -->
+    <div id="modal" class="fixed inset-0 bg-slate-900/60 hidden items-center justify-center z-50 backdrop-blur-sm transition-opacity">
+        <div class="bg-white p-6 rounded-[2rem] shadow-2xl w-80 max-w-full mx-4 transform transition-all scale-100 border border-slate-100">
+            <div id="modal-icon" class="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-2xl mb-4 mx-auto">🤔</div>
+            <h3 id="modal-title" class="text-xl font-black text-slate-800 mb-2 text-center">提示</h3>
+            <p id="modal-msg" class="text-sm text-slate-600 mb-6 text-center leading-relaxed">訊息內容</p>
+            <div id="modal-buttons" class="flex space-x-3">
+                <button id="modal-close-btn" class="flex-1 py-3 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300 transition-colors">取消</button>
+                <button id="modal-action-btn" class="flex-1 py-3 bg-accent-teal text-white rounded-xl font-bold hover:bg-accent-teal/80 transition-colors">確認</button>
+            </div>
         </div>
     </div>
 
@@ -228,34 +312,40 @@
             };
         }
 
-        // 初始化 Firebase
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // 共用資料夾 ID
         const SHARED_LEDGER_ID = 'hnm_shared_ledger_v1';
         
-        // 狀態變數
         let currentUser = null;
         let exchangeRates = null;
-        let partyNames = { H: '我 (H)', M: '夥伴 (M)' };
+        let currentBalanceTWD = 0; // 新增：追蹤目前餘額
+        // 更新預設名稱為中性用語
+        let partyNames = { H: '成員 H', M: '成員 M' };
         
-        // DOM 元素
+        // DOM 元素 (保持不變)
         const els = {
             statusDot: document.getElementById('status-dot'),
             statusText: document.getElementById('connection-status'),
             userId: document.getElementById('user-id'),
+            // Balance Card Elements
             balanceCard: document.getElementById('balance-card'),
+            balanceIndicator: document.getElementById('balance-indicator-bar'),
+            balanceGlow: document.getElementById('balance-glow'),
             balanceText: document.getElementById('balance-status-text'),
             balanceAmount: document.getElementById('balance-amount'),
+            statusIcon: document.getElementById('status-icon'),
             ratesDisplay: document.getElementById('rates-display'),
+            clearBalanceBtn: document.getElementById('clear-balance-btn'), // 新增
+            // Settings
             toggleSettings: document.getElementById('toggle-settings'),
             settingsPanel: document.getElementById('settings-panel'),
             settingsIcon: document.getElementById('settings-icon'),
             hNameInput: document.getElementById('h-name-input'),
             mNameInput: document.getElementById('m-name-input'),
             saveNamesBtn: document.getElementById('save-names-btn'),
+            // Form
             form: document.getElementById('expense-form'),
             date: document.getElementById('recordDate'),
             currency: document.getElementById('currency'),
@@ -267,83 +357,137 @@
             amountH: document.getElementById('amountH'),
             amountM: document.getElementById('amountM'),
             submitBtn: document.getElementById('submit-btn'),
+            // Labels
             payerHLabel: document.getElementById('payer-h-label'),
             payerMLabel: document.getElementById('payer-m-label'),
             splitHLabel: document.getElementById('split-h-label'),
             splitMLabel: document.getElementById('split-m-label'),
+            // List & Modal
             list: document.getElementById('records-list'),
             modal: document.getElementById('modal'),
+            modalIcon: document.getElementById('modal-icon'),
             modalTitle: document.getElementById('modal-title'),
-            modalMsg: document.getElementById('modal-msg')
+            modalMsg: document.getElementById('modal-msg'),
+            modalCloseBtn: document.getElementById('modal-close-btn'), // 新增
+            modalActionBtn: document.getElementById('modal-action-btn') // 新增
         };
 
         // --- 2. 輔助函式 ---
 
+        // 彈出式視窗：取消/關閉動作
         window.closeModal = () => {
             els.modal.classList.add('hidden');
             els.modal.classList.remove('flex');
+            // 清除 action 監聽器
+            els.modalActionBtn.onclick = null; 
+            els.modalActionBtn.classList.add('hidden');
+            els.modalCloseBtn.textContent = '知道了';
+            els.modalCloseBtn.classList.remove('flex-1');
+            els.modalCloseBtn.classList.add('w-full');
+            els.modalActionBtn.classList.remove('flex-1');
+            els.modalCloseBtn.classList.remove('bg-slate-200');
+            els.modalCloseBtn.classList.add('bg-slate-800');
+            els.modalCloseBtn.classList.add('text-white');
         };
 
-        const showModal = (title, msg) => {
+        // 彈出式視窗：純提示
+        const showModal = (title, msg, icon = '🤔') => {
+            els.modalIcon.textContent = icon;
             els.modalTitle.textContent = title;
             els.modalMsg.textContent = msg;
             els.modal.classList.remove('hidden');
             els.modal.classList.add('flex');
+            els.modalCloseBtn.onclick = closeModal;
+            els.modalActionBtn.classList.add('hidden');
+            els.modalCloseBtn.textContent = '知道了';
+            els.modalCloseBtn.classList.remove('flex-1');
+            els.modalCloseBtn.classList.add('w-full');
+            els.modalCloseBtn.classList.remove('bg-slate-800');
+            els.modalCloseBtn.classList.remove('text-white');
+            els.modalCloseBtn.classList.add('bg-slate-200');
+            els.modalCloseBtn.classList.add('text-slate-700');
         };
 
+        // 彈出式視窗：確認動作
+        const showConfirmModal = (title, msg, actionText, callback) => {
+            els.modalIcon.textContent = '⚠️';
+            els.modalTitle.textContent = title;
+            els.modalMsg.textContent = msg;
+            els.modalActionBtn.textContent = actionText;
+
+            els.modal.classList.remove('hidden');
+            els.modal.classList.add('flex');
+            
+            els.modalCloseBtn.onclick = closeModal;
+            els.modalActionBtn.onclick = () => {
+                closeModal();
+                callback();
+            };
+
+            // 調整按鈕樣式以顯示兩個按鈕
+            els.modalActionBtn.classList.remove('hidden');
+            els.modalActionBtn.classList.add('flex-1');
+            els.modalCloseBtn.classList.add('flex-1');
+            els.modalCloseBtn.classList.remove('w-full');
+            els.modalCloseBtn.textContent = '取消';
+            els.modalCloseBtn.classList.add('bg-slate-200');
+            els.modalCloseBtn.classList.remove('bg-slate-800');
+            els.modalCloseBtn.classList.remove('text-white');
+            els.modalCloseBtn.classList.add('text-slate-700');
+
+        };
+        
+        // 更新連線狀態 UI (配色調整)
         const updateStatus = (status) => {
             if (status === 'connected') {
-                els.statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
+                els.statusDot.className = 'w-2 h-2 rounded-full bg-accent-teal';
                 els.statusText.textContent = '已連線';
+                els.statusText.className = 'text-xs font-bold text-accent-teal';
                 els.submitBtn.disabled = false;
-                els.submitBtn.textContent = '儲存紀錄';
+                els.submitBtn.textContent = '確認儲存紀錄';
+                els.clearBalanceBtn.disabled = Math.abs(currentBalanceTWD) < 0.5; // 連線後檢查欠款
             } else if (status === 'error') {
-                els.statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                els.statusDot.className = 'w-2 h-2 rounded-full bg-accent-rose';
                 els.statusText.textContent = '連線錯誤';
+                els.statusText.className = 'text-xs font-bold text-accent-rose';
                 els.submitBtn.disabled = true;
                 els.submitBtn.textContent = '無法連線';
+                els.clearBalanceBtn.disabled = true;
             } else {
-                els.statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 animate-pulse';
+                els.statusDot.className = 'w-2 h-2 rounded-full bg-slate-300 animate-pulse';
                 els.statusText.textContent = '連線中...';
+                els.statusText.className = 'text-xs font-bold text-slate-400';
                 els.submitBtn.disabled = true;
+                els.clearBalanceBtn.disabled = true;
             }
         };
 
-        // --- 3. 資料庫路徑定義 (修正後) ---
-        // 集合 (Collection) 必須是 1, 3, 5... 片段
-        // 文件 (Document) 必須是 2, 4, 6... 片段
-        
+        // --- 3. 資料庫路徑定義 (不變) ---
         const getExpensesRef = () => {
             if (typeof __app_id !== 'undefined') {
-                // Path: artifacts/{appId}/public/data/hnm_expenses (5 segments - OK for Collection)
                 return collection(db, `artifacts/${__app_id}/public/data/hnm_expenses`);
             }
-            // Path: hnm_spliter_data/{ID}/expenses (3 segments - OK for Collection)
             return collection(db, `hnm_spliter_data/${SHARED_LEDGER_ID}/expenses`);
         };
 
         const getBalanceRef = () => {
             if (typeof __app_id !== 'undefined') {
-                // Path: artifacts/{appId}/public/data/hnm_shared/balance (6 segments - OK for Document)
-                // Collection: .../hnm_shared (5 segments)
                 return doc(db, `artifacts/${__app_id}/public/data/hnm_shared/balance`);
             }
-            // Path: hnm_spliter_data/{ID}/shared/balance (4 segments - OK for Document)
             return doc(db, `hnm_spliter_data/${SHARED_LEDGER_ID}/shared/balance`);
         };
 
         const getSettingsRef = () => {
             if (typeof __app_id !== 'undefined') {
-                // Path: artifacts/{appId}/public/data/hnm_shared/settings (6 segments - OK for Document)
                 return doc(db, `artifacts/${__app_id}/public/data/hnm_shared/settings`);
             }
-            // Path: hnm_spliter_data/{ID}/shared/settings (4 segments - OK for Document)
             return doc(db, `hnm_spliter_data/${SHARED_LEDGER_ID}/shared/settings`);
         };
 
-        // --- 4. 匯率 API ---
+        // --- 4. 匯率 API (UI 更新 - 不變) ---
         const fetchRates = async () => {
             try {
+                // ... (匯率獲取邏輯不變) ...
                 const res = await fetch('https://open.er-api.com/v6/latest/TWD');
                 if (!res.ok) throw new Error('Rate API Error');
                 const data = await res.json();
@@ -353,83 +497,133 @@
                     JPY: 1 / data.rates.JPY
                 };
                 
+                // 更新匯率顯示 UI
                 els.ratesDisplay.innerHTML = `
-                    <span class="mr-2">🇺🇸 1 USD ≈ ${exchangeRates.USD.toFixed(2)}</span>
-                    <span>🇯🇵 1 JPY ≈ ${exchangeRates.JPY.toFixed(2)}</span>
+                    <div class="flex items-center gap-1"><span class="text-base">🇺🇸</span> <span>${exchangeRates.USD.toFixed(2)}</span></div>
+                    <div class="flex items-center gap-1"><span class="text-base">🇯🇵</span> <span>${exchangeRates.JPY.toFixed(2)}</span></div>
                 `;
             } catch (e) {
                 console.error("匯率獲取失敗", e);
-                els.ratesDisplay.textContent = "⚠️ 匯率載入失敗，請檢查網路";
-                els.ratesDisplay.classList.add('text-red-500');
+                els.ratesDisplay.innerHTML = `<span class="text-accent-rose flex items-center"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 mr-1"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" /></svg>匯率錯誤</span>`;
             }
         };
 
-        // --- 5. 邏輯與互動 ---
+        // --- 5. 邏輯與互動 (UI 更新) ---
 
         const updateNamesUI = () => {
             els.payerHLabel.textContent = partyNames.H;
             els.payerMLabel.textContent = partyNames.M;
             els.splitHLabel.textContent = `${partyNames.H} 應付`;
             els.splitMLabel.textContent = `${partyNames.M} 應付`;
-            els.hNameInput.value = partyNames.H === '我 (H)' ? '' : partyNames.H;
-            els.mNameInput.value = partyNames.M === '夥伴 (M)' ? '' : partyNames.M;
+            // Update placeholders only if empty to avoid overwriting user input
+            if (!els.hNameInput.value) els.hNameInput.placeholder = partyNames.H;
+             if (!els.mNameInput.value) els.mNameInput.placeholder = partyNames.M;
+             
+             // 確保在名稱更新時，餘額顯示也更新
+             renderBalance(currentBalanceTWD);
         };
 
+        // 渲染欠款卡片 (低飽和度風格)
         const renderBalance = (balance) => {
+            currentBalanceTWD = balance; // 更新全局變數
             const val = Math.abs(balance);
             els.balanceAmount.textContent = val.toLocaleString('zh-TW', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-            els.balanceCard.className = "relative overflow-hidden rounded-2xl shadow-xl p-6 text-white transition-all duration-500 bg-gradient-to-br";
             
-            if (balance > 5) { // M 欠 H
-                els.balanceCard.classList.add('from-emerald-600', 'to-teal-800');
-                els.balanceText.textContent = `🎉 ${partyNames.M} 欠 ${partyNames.H}`;
-            } else if (balance < -5) { // H 欠 M
-                els.balanceCard.classList.add('from-rose-600', 'to-red-800');
-                els.balanceText.textContent = `💸 ${partyNames.H} 欠 ${partyNames.M}`;
+            // 重置基本樣式
+            els.balanceText.className = "text-xl font-bold flex items-center text-white";
+            els.statusIcon.className = "mr-2 text-2xl";
+
+            if (balance > 5) { // M 欠 H (優勢 - 柔和青綠)
+                els.balanceIndicator.className = "absolute left-0 top-0 bottom-0 w-2 bg-accent-teal transition-colors duration-500";
+                els.balanceGlow.className = "absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-accent-teal/20 rounded-full blur-3xl pointer-events-none transition-colors duration-500";
+                els.statusIcon.textContent = "🎉";
+                els.balanceText.innerHTML = `<span class="mr-2 text-2xl">🎉</span><span>${partyNames.M} 欠 ${partyNames.H}</span>`;
+            } else if (balance < -5) { // H 欠 M (劣勢 - 柔和玫瑰紅)
+                els.balanceIndicator.className = "absolute left-0 top-0 bottom-0 w-2 bg-accent-rose transition-colors duration-500";
+                els.balanceGlow.className = "absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-accent-rose/20 rounded-full blur-3xl pointer-events-none transition-colors duration-500";
+                 els.statusIcon.textContent = "💸";
+                 els.balanceText.innerHTML = `<span class="mr-2 text-2xl">💸</span><span>${partyNames.H} 欠 ${partyNames.M}</span>`;
+            } else { // 兩清 (中性 - 岩灰)
+                els.balanceIndicator.className = "absolute left-0 top-0 bottom-0 w-2 bg-slate-600 transition-colors duration-500";
+                els.balanceGlow.className = "absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-slate-700/20 rounded-full blur-3xl pointer-events-none transition-colors duration-500";
+                els.statusIcon.textContent = "⚖️";
+                els.balanceText.innerHTML = `<span class="mr-2 text-2xl">⚖️</span><span>目前兩清</span>`;
+            }
+
+            // 結清按鈕啟用邏輯：欠款絕對值超過 5 元才啟用
+            const isOwed = Math.abs(currentBalanceTWD) > 5;
+            els.clearBalanceBtn.disabled = !isOwed;
+            
+            // UI 動畫
+            if (isOwed) {
+                els.clearBalanceBtn.classList.remove('opacity-0', 'translate-y-2');
+                els.clearBalanceBtn.classList.add('opacity-100', 'translate-y-0');
             } else {
-                els.balanceCard.classList.add('from-gray-600', 'to-gray-800');
-                els.balanceText.textContent = "⚖️ 目前兩清";
+                 els.clearBalanceBtn.classList.remove('opacity-100', 'translate-y-0');
+                 els.clearBalanceBtn.classList.add('opacity-0', 'translate-y-2');
             }
         };
 
+        // 渲染列表 (低飽和度風格 - 不變)
         const renderList = (docs) => {
             if (docs.length === 0) {
-                els.list.innerHTML = '<div class="text-center text-gray-400 py-8 text-sm">還沒有紀錄，快去記一筆吧！</div>';
+                els.list.innerHTML = '<div class="text-center text-slate-400 py-8 text-sm font-medium bg-white rounded-2xl border border-dashed border-slate-200">還沒有紀錄，快去記一筆吧！</div>';
                 return;
             }
             
-            els.list.innerHTML = docs.map(doc => {
+            els.list.innerHTML = docs.map((doc, index) => {
                 const data = doc.data();
-                const date = new Date(data.date).toLocaleDateString();
+                const date = new Date(data.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                 const isPayerH = data.payer === 'H';
                 const payerName = isPayerH ? partyNames.H : partyNames.M;
                 
+                // 使用低飽和度的顏色類別
+                let iconBg = isPayerH ? 'bg-accent-blue/10 text-accent-blue' : 'bg-accent-orange/10 text-accent-orange';
+                let description = data.description;
+
                 let detailText = '';
                 if (data.splitType === 'equal') {
-                    detailText = `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">均分</span>`;
+                    detailText = `<span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-1 rounded-full uppercase tracking-wider">均分</span>`;
                 } else {
-                    detailText = `<span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">自訂</span>`;
+                    detailText = `<span class="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-1 rounded-full uppercase tracking-wider border border-amber-100">自訂</span>`;
+                }
+
+                // 特別處理結清紀錄
+                if (data.description === '結清欠款') {
+                    iconBg = 'bg-slate-200 text-slate-700';
+                    detailText = `<span class="text-[10px] font-black bg-accent-teal/10 text-accent-teal px-2 py-1 rounded-full uppercase tracking-wider">兩清</span>`;
+                    description = data.description;
                 }
 
                 let rateTag = '';
                 if (data.currency !== 'TWD') {
-                    rateTag = `<span class="text-[10px] text-gray-400 ml-1">(匯率 ${data.rate.toFixed(2)})</span>`;
+                    rateTag = `<div class="text-[10px] text-slate-400 mt-0.5 font-mono bg-slate-50 inline-block px-1 rounded ml-2">匯率 ${data.rate.toFixed(2)}</div>`;
                 }
 
+                // 增加一點出現動畫延遲
+                const delay = index * 50;
+
                 return `
-                <div class="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100 shadow-sm">
-                    <div class="flex items-center space-x-3">
-                        <div class="flex flex-col items-center justify-center w-10 h-10 rounded-full ${isPayerH ? 'bg-indigo-100 text-indigo-600' : 'bg-orange-100 text-orange-600'} font-bold text-sm">
+                <div class="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 soft-shadow transition-all hover:-translate-y-0.5 hover:shadow-md" style="animation: slideIn 0.3s ease-out ${delay}ms backwards;">
+                    <div class="flex items-center space-x-4">
+                        <div class="flex flex-col items-center justify-center w-12 h-12 rounded-xl ${iconBg} font-black text-lg">
                             ${data.payer}
                         </div>
                         <div>
-                            <div class="font-bold text-gray-800 text-sm">${data.description}</div>
-                            <div class="text-xs text-gray-500 mt-0.5">${date} · ${payerName} 先付 ${rateTag}</div>
+                            <div class="font-bold text-slate-800 text-base flex items-center">
+                                ${description}
+                                <span class="text-xs font-medium text-slate-400 ml-2 font-mono">${date}</span>
+                            </div>
+                            <div class="text-xs font-medium text-slate-500 mt-1 flex items-center">
+                                <span class="font-bold ${isPayerH ? 'text-accent-blue' : 'text-accent-orange'}">${payerName}</span>
+                                <span class="mx-1">先付</span>
+                                ${rateTag}
+                            </div>
                         </div>
                     </div>
                     <div class="text-right">
-                        <div class="font-bold text-gray-800">${data.originalAmount.toLocaleString()} <span class="text-xs font-normal">${data.currency}</span></div>
-                        <div class="mt-1">${detailText}</div>
+                        <div class="font-black text-slate-800 text-lg tabular-nums">${data.originalAmount.toLocaleString()} <span class="text-xs font-bold text-slate-500 ml-0.5">${data.currency}</span></div>
+                        <div class="mt-1 flex justify-end">${detailText}</div>
                     </div>
                 </div>
                 `;
@@ -450,7 +644,104 @@
             }
         };
 
-        // --- 6. 事件監聽 ---
+        // --- 6. 核心功能：一鍵結清邏輯 ---
+        const handleClearBalance = () => {
+            if (!currentUser) {
+                showModal('錯誤', '尚未連線到資料庫，無法執行結清。');
+                return;
+            }
+
+            const balance = currentBalanceTWD;
+            if (Math.abs(balance) < 5) {
+                showModal('提示', '欠款金額少於 $5 TWD，建議先不結清');
+                return;
+            }
+
+            // 欠錢的人 (Payer) 和被欠錢的人 (Recipient)
+            const payerId = balance > 0 ? 'M' : 'H'; // M owes H if B > 0
+            const recipientId = balance > 0 ? 'H' : 'M'; // H owes M if B < 0
+            const amount = Math.abs(balance);
+            
+            const payerName = payerId === 'H' ? partyNames.H : partyNames.M;
+            const recipientName = recipientId === 'H' ? partyNames.H : partyNames.M;
+
+            const msg = `${payerName} 將支付 $${amount.toFixed(0)} TWD 給 ${recipientName}，以結清所有欠款。`
+                      + `<br><br>系統將自動產生一筆「結清欠款」的紀錄。確認執行嗎？`;
+
+            showConfirmModal('確認結清欠款', msg, `確認支付 $${amount.toFixed(0)} TWD`, async () => {
+                
+                els.clearBalanceBtn.disabled = true;
+                els.clearBalanceBtn.textContent = '處理中...';
+
+                try {
+                    // 1. 產生結清交易紀錄 (使用 TWD)
+                    const newExpense = {
+                        date: new Date().toISOString().slice(0, 10), // 當前日期
+                        description: '結清欠款',
+                        currency: 'TWD',
+                        originalAmount: amount, // 支付金額
+                        rate: 1, 
+                        totalTWD: amount,
+                        payer: payerId, // 結帳人是還錢的人
+                        splitType: 'custom',
+                        createdAt: serverTimestamp()
+                    };
+
+                    // 結清邏輯：這筆交易 (amount) 100% 應該由 Recipient 承擔，
+                    // 讓 Payer 支付的金額完全流向 Recipient。
+                    // H 應付多少？ M 應付多少？
+                    let netChangeForM = 0;
+                    if (payerId === 'H') {
+                        // H 付了 amount，但 M 應該全額承擔 (M 應付 amount)。
+                        // H 應付 0，M 應付 amount。
+                        // netChangeForM = amountMTWD - amountHTWD = amount - 0 = amount (正數)
+                        // B < 0, netChangeForM 應為 -B (正數). amount = |B| = -B. => netChangeForM = amount. (正確)
+                        netChangeForM = amount;
+                    } else { // payerId === 'M'
+                        // M 付了 amount，但 H 應該全額承擔 (H 應付 amount)。
+                        // H 應付 amount，M 應付 0。
+                        // netChangeForM = amountMTWD - amountHTWD = 0 - amount = -amount (負數)
+                        // B > 0, netChangeForM 應為 -B (負數). amount = B. => netChangeForM = -amount. (正確)
+                        netChangeForM = -amount;
+                    }
+                    
+                    newExpense.netChangeForM = netChangeForM;
+                    
+                    await addDoc(getExpensesRef(), newExpense);
+
+                    // 2. 將餘額直接設為 0
+                    const balanceRef = getBalanceRef();
+                    await setDoc(balanceRef, { 
+                        amount: 0, // 直接設為 0
+                        lastUpdated: serverTimestamp()
+                    });
+
+                    els.clearBalanceBtn.disabled = false;
+                    els.clearBalanceBtn.textContent = '🤝 已結清！';
+                    els.clearBalanceBtn.classList.add('bg-accent-teal', 'hover:bg-accent-teal/80');
+                    els.clearBalanceBtn.classList.remove('bg-slate-600', 'hover:bg-slate-700');
+
+                    showModal('結清成功', `總欠款已歸零。已新增一筆結清紀錄。`, '✅');
+                    
+                    setTimeout(() => {
+                         els.clearBalanceBtn.textContent = '🤝 一鍵結清';
+                         els.clearBalanceBtn.classList.remove('bg-accent-teal', 'hover:bg-accent-teal/80');
+                         els.clearBalanceBtn.classList.add('bg-slate-600', 'hover:bg-slate-700');
+                    }, 2000);
+
+
+                } catch (e) {
+                    console.error("結清失敗", e);
+                    showModal('錯誤', '結清失敗: ' + e.message, '❌');
+                    els.clearBalanceBtn.disabled = false;
+                    els.clearBalanceBtn.textContent = '🤝 一鍵結清';
+                }
+            });
+        };
+
+        // --- 7. 事件監聽 (新增結清按鈕監聽) ---
+
+        els.clearBalanceBtn.addEventListener('click', handleClearBalance);
 
         els.toggleSettings.addEventListener('click', () => {
             els.settingsPanel.classList.toggle('hidden');
@@ -458,16 +749,29 @@
         });
 
         els.saveNamesBtn.addEventListener('click', async () => {
-            const newH = els.hNameInput.value.trim() || '我 (H)';
-            const newM = els.mNameInput.value.trim() || '夥伴 (M)';
+            const newH = els.hNameInput.value.trim();
+            const newM = els.mNameInput.value.trim();
+            // Only save if at least one is provided to avoid saving empty strings over defaults immediately
+            if (!newH && !newM) {
+                 showModal('提示', '請輸入要修改的名稱');
+                 return;
+            }
+
+            const updates = {};
+            if (newH) updates.H = newH;
+            if (newM) updates.M = newM;
+
             try {
-                await setDoc(getSettingsRef(), { H: newH, M: newM }, { merge: true });
+                await setDoc(getSettingsRef(), updates, { merge: true });
                 els.settingsPanel.classList.add('hidden');
                 els.settingsIcon.classList.remove('rotate-180');
-                showModal('成功', '名稱已更新！');
+                // Clear inputs after save
+                els.hNameInput.value = '';
+                els.mNameInput.value = '';
+                showModal('成功', '名稱已更新！', '👍');
             } catch (e) {
                 console.error(e);
-                showModal('錯誤', '名稱儲存失敗: ' + e.message);
+                showModal('錯誤', '名稱儲存失敗: ' + e.message, '❌');
             }
         });
 
@@ -529,8 +833,9 @@
             } else {
                 const valH = parseFloat(els.amountH.value) || 0;
                 const valM = parseFloat(els.amountM.value) || 0;
-                if (Math.abs((valH + valM) - totalOriginal) > 0.1) {
-                    showModal('錯誤', '分帳金額總和不等於總金額');
+                // 允許小於一元的誤差
+                if (Math.abs((valH + valM) - totalOriginal) > 0.99) {
+                    showModal('錯誤', '自訂分帳金額總和與總金額相差過大，請檢查。');
                     return;
                 }
                 amountMTWD = valM * rate;
@@ -538,13 +843,48 @@
             }
 
             if (payer === 'H') {
-                netChangeForM = amountMTWD;
-            } else {
-                netChangeForM = -amountHTWD;
+                // H 付錢，H 應得 amountHTWD，M 應得 amountMTWD
+                netChangeForM = amountMTWD - amountHTWD; // M 應付 - H 應付 (M 的角度)
+            } else { // Payer === 'M'
+                // M 付錢，H 應得 amountHTWD，M 應得 amountMTWD
+                netChangeForM = amountMTWD - amountHTWD; // M 應付 - H 應付 (M 的角度)
             }
+            
+            // 由於 payer 是先付錢的人，所以 payer 應該得到 full amount，
+            // 另一個人承擔他的份額。
+            // M 欠 H: netChangeForM > 0
+            // H 欠 M: netChangeForM < 0
+            
+            // 修正邏輯：
+            // H 付款，M 應付 amountMTWD。H 墊付了 amountMTWD。
+            //   M 欠 H: +amountMTWD
+            // M 付款，H 應付 amountHTWD。M 墊付了 amountHTWD。
+            //   M 欠 H: -amountHTWD (H 欠 M)
+
+            // netChangeForM = (M 應付的金額) - (H 應付的金額)
+            // (M 的餘額變化，正數代表 M 欠 H 更多)
+
+            // Payer: H
+            // M 應付: amountMTWD
+            // H 應付: amountHTWD
+            // H 支付 TotalTWD
+            // M 欠 H 的金額增加 (M 的淨變化) = amountMTWD 
+            // H 欠 M 的金額增加 (M 的淨變化) = -amountHTWD
+            // M 的最終淨變化 (H付帳) = amountMTWD - amountHTWD
+
+            // Payer: M
+            // M 應付: amountMTWD
+            // H 應付: amountHTWD
+            // M 支付 TotalTWD
+            // M 墊付 H 的金額 (M 的淨變化) = -amountHTWD
+            // M 墊付 M 的金額 (M 的淨變化) = amountMTWD
+            // M 的最終淨變化 (M付帳) = -amountHTWD + amountMTWD
+            
+            // 結論： netChangeForM 恆等於 amountMTWD - amountHTWD
+            netChangeForM = amountMTWD - amountHTWD;
 
             els.submitBtn.disabled = true;
-            els.submitBtn.textContent = '儲存中...';
+            els.submitBtn.textContent = '處理中...';
 
             try {
                 await addDoc(getExpensesRef(), {
@@ -556,16 +896,24 @@
                     totalTWD,
                     payer,
                     splitType,
-                    netChangeForM,
+                    netChangeForM, // 紀錄 M 相對於 H 的淨變化 (M > 0 欠 H; M < 0 H 欠 M)
                     createdAt: serverTimestamp()
                 });
 
+                // 這裡我們依然使用讀取-寫入的方式來更新餘額
                 const balanceRef = getBalanceRef();
                 const balanceSnap = await getDoc(balanceRef);
                 let currentBalance = 0;
                 if (balanceSnap.exists()) {
                     currentBalance = balanceSnap.data().amount || 0;
                 }
+                // H 付錢: currentBalance + netChangeForM
+                // M 付錢: currentBalance - netChangeForM
+                
+                // 這裡的 netChangeForM 已經是 M 欠 H 的淨變化，
+                // 不管誰付錢，新的欠款就是舊欠款加上這筆交易對 M 的淨影響。
+                // 交易邏輯已調整， netChangeForM > 0 表示 M 欠 H，< 0 表示 H 欠 M
+                
                 const newBalance = currentBalance + netChangeForM;
                 
                 await setDoc(balanceRef, { 
@@ -575,29 +923,51 @@
 
                 els.form.reset();
                 els.date.valueAsDate = new Date();
+                // Reset currency label visually
+                els.currency.value = 'TWD';
                 els.currencyLabel.textContent = 'TWD';
                 els.customSplitArea.classList.add('hidden');
                 els.submitBtn.disabled = false;
-                els.submitBtn.textContent = '儲存紀錄';
-                showModal('成功', '紀錄已儲存！');
+                
+                // 簡單的成功回饋動畫 (可選)
+                els.submitBtn.classList.add('bg-accent-teal');
+                els.submitBtn.textContent = '已儲存！';
+                setTimeout(() => {
+                     els.submitBtn.classList.remove('bg-accent-teal');
+                     els.submitBtn.textContent = '確認儲存紀錄';
+                }, 1500);
+
 
             } catch (e) {
                 console.error(e);
-                showModal('錯誤', '儲存失敗: ' + e.message);
+                showModal('錯誤', '儲存失敗: ' + e.message, '❌');
                 els.submitBtn.disabled = false;
-                els.submitBtn.textContent = '儲存紀錄';
+                els.submitBtn.textContent = '確認儲存紀錄';
             }
         });
 
-        // --- 7. 啟動程序 ---
+        // --- 8. 啟動程序 (不變) ---
 
         els.date.valueAsDate = new Date();
         updateStatus('loading');
+        els.modalCloseBtn.onclick = closeModal;
+        els.modalActionBtn.onclick = closeModal; // 確保有默認行為
+
+        // 添加列表動畫樣式
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes slideIn {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+        `;
+        document.head.appendChild(style);
+
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
-                els.userId.textContent = `ID: ${user.uid.slice(0, 6)}...`;
+                els.userId.textContent = `ID: ${user.uid.slice(0, 6)}`;
                 updateStatus('connected');
                 
                 onSnapshot(getBalanceRef(), (doc) => {
@@ -607,19 +977,12 @@
                 
                 onSnapshot(getSettingsRef(), (doc) => {
                     if (doc.exists()) {
-                        partyNames = doc.data();
+                        Object.assign(partyNames, { H: '成員 H', M: '成員 M' }, doc.data());
                         updateNamesUI();
-                        // 如果餘額已顯示，重新渲染以更新名字
-                        if (els.balanceAmount.textContent !== '---') {
-                            const balStr = els.balanceAmount.textContent.replace(/,/g, '');
-                            // 我們需要知道原始正負號來判斷方向，但這裡只有絕對值
-                            // 簡單做法：我們根據當前 UI 文字反推，或者直接重讀一次 balance
-                            // 最好的方式是 getBalanceRef 監聽器會再次觸發嗎？不會，因為 doc 沒變。
-                            // 所以這裡手動觸發一次
-                            getDoc(getBalanceRef()).then(snap => {
-                                if(snap.exists()) renderBalance(snap.data().amount || 0);
-                            });
-                        }
+                        // 確保在名稱更新時，餘額顯示也更新
+                        getDoc(getBalanceRef()).then(snap => {
+                            if(snap.exists()) renderBalance(snap.data().amount || 0);
+                        });
                     }
                 });
 
