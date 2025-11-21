@@ -1,125 +1,227 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>HnM Spliter - 無賴帳本</title>
-<style>
-  body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-  .card { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-  .row { display: flex; gap: 10px; margin-bottom: 10px; }
-  input, select { flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
-  h2 { margin-top: 0; }
-  .status { font-size: 20px; font-weight: bold; color: #d9534f; }
-  table { width: 100%; border-collapse: collapse; }
-  td, th { border-bottom: 1px solid #ccc; padding: 8px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase 匿名登入與狀態顯示</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 設置字體為 Inter -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4f46e5',
+                        'success': '#10b981',
+                        'danger': '#ef4444',
+                        'warning': '#f59e0b',
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body>
+<body class="p-4 sm:p-8 flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-lg bg-white p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
+        <h1 class="text-3xl font-bold text-center text-gray-800 border-b pb-3">
+            Firebase 匿名登入狀態
+        </h1>
 
-<div class="card">
-  <h2>目前欠款狀態</h2>
-  <div id="statusDisplay" class="status">尚無資料</div>
-</div>
+        <!-- 連線狀態卡片 -->
+        <div id="status-card" class="p-4 rounded-xl shadow-lg transition-all duration-300 bg-gray-100 border border-gray-200">
+            <h2 class="text-lg font-semibold mb-2 text-gray-700">連線/登入狀態</h2>
+            <div class="flex items-center space-x-3">
+                <div id="status-indicator" class="w-4 h-4 rounded-full bg-gray-400 animate-pulse"></div>
+                <p id="connection-status" class="text-gray-600 font-medium">初始化中...</p>
+            </div>
+            
+            <p id="user-id-display" class="text-sm font-mono text-gray-500 mt-3 break-all">
+                使用者 ID: 尚未登入
+            </p>
+        </div>
 
-<div class="card">
-  <h2>新增分帳紀錄</h2>
+        <!-- 功能區塊 (模擬應用程式內容) -->
+        <div class="p-4 border-t border-gray-200 pt-6">
+            <h2 class="text-xl font-semibold mb-3 text-gray-800">應用程式內容 (匿名可用)</h2>
+            <p class="text-gray-600">
+                您已成功建立一個可以跨裝置使用的應用程式基底。匿名登入讓每個使用者擁有獨立的 ID 來儲存資料。
+            </p>
+        </div>
+    </div>
 
-  <div class="row">
-    <select id="payer">
-      <option value="YM">YM</option>
-      <option value="OL">OL</option>
-    </select>
-    <input type="date" id="dateInput" />
-  </div>
+    <!-- 模組化錯誤提示框 (用於取代 alert()) -->
+    <div id="modal-container" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-96 max-w-full m-4">
+            <h3 class="text-xl font-bold text-danger mb-3">錯誤通知</h3>
+            <p id="modal-message" class="text-gray-700 text-sm"></p>
+            <div class="mt-4 text-right">
+                <button onclick="document.getElementById('modal-container').classList.add('hidden')" class="px-4 py-2 bg-primary text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition">
+                    確定
+                </button>
+            </div>
+        </div>
+    </div>
 
-  <div class="row">
-    <input type="number" id="totalAmount" placeholder="總金額 (TWD)" />
-    <select id="currency">
-      <option value="TWD">新台幣 (TWD)</option>
-      <option value="JPY">日圓 (JPY)</option>
-      <option value="USD">美元 (USD)</option>
-    </select>
-  </div>
+    <!-- Firebase Script -->
+    <script type="module">
+        // 導入 Firebase 模組
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            onAuthStateChanged 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        
+        // --- 替換為您自己的 Firebase 配置資訊 ---
+        // 注意：為了在 GitHub Pages 上運行，您必須在這裡手動填寫您的配置
+        const firebaseConfig = {
+            // 已替換為您提供的配置
+            apiKey: "AIzaSyCRHx0i02nojkN5-y5HxS3P3i1jA5SEy8E", 
+            authDomain: "hnm-spliter.firebaseapp.com",
+            projectId: "hnm-spliter",
+            storageBucket: "hnm-spliter.firebasestorage.app",
+            messagingSenderId: "514297368344",
+            appId: "1:514297368344:web:a9ee0cb370cddc1b6e986d",
+            measurementId: "G-4DY12810X8"
+        };
+        // ------------------------------------
 
-  <div class="row">
-    <input type="number" id="amountYM" placeholder="YM 負擔" />
-    <input type="number" id="amountOL" placeholder="OL 負擔" />
-  </div>
+        // --- DOM 元素 ---
+        const connectionStatusElement = document.getElementById('connection-status');
+        const statusIndicator = document.getElementById('status-indicator');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const statusCard = document.getElementById('status-card');
 
-  <button id="addRecord">加入紀錄</button>
-</div>
+        // --- 輔助函式 ---
 
-<div class="card">
-  <h2>最近五筆紀錄</h2>
-  <table>
-    <thead><tr><th>日期</th><th>付款者</th><th>金額</th><th>幣別</th></tr></thead>
-    <tbody id="recentRecords"></tbody>
-  </table>
-</div>
+        // 顯示模組化提示框
+        const showModal = (message) => {
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-container').classList.remove('hidden');
+        };
 
-<script>
-// 匯率自動抓取
-async function fetchRates() {
-  const res = await fetch("https://open.er-api.com/v6/latest/TWD");
-  const data = await res.json();
-  return data.rates;
-}
+        // 更新連線狀態顯示
+        const setConnectionStatus = (status, message = '', userId = null) => {
+            let bgColorClass = 'bg-gray-400';
+            let textColorClass = 'text-gray-600';
+            let statusText = message || '未知狀態';
+            
+            // 重置樣式
+            statusIndicator.classList.remove('bg-gray-400', 'bg-success', 'bg-danger', 'bg-warning', 'animate-pulse');
+            statusCard.classList.remove('bg-gray-100', 'bg-green-50', 'bg-red-50', 'border-gray-200', 'border-success', 'border-danger');
 
-let exchangeRates = {};
-fetchRates().then(r => exchangeRates = r);
+            switch (status) {
+                case 'connecting':
+                    statusText = '連線中...';
+                    bgColorClass = 'bg-warning';
+                    textColorClass = 'text-warning';
+                    statusIndicator.classList.add('animate-pulse');
+                    statusCard.classList.add('bg-gray-100', 'border-warning');
+                    break;
+                case 'connected':
+                    statusText = '已成功登入 (匿名)';
+                    bgColorClass = 'bg-success';
+                    textColorClass = 'text-success';
+                    statusCard.classList.add('bg-green-50', 'border-success');
+                    break;
+                case 'error':
+                    statusText = message || '連線或登入失敗';
+                    bgColorClass = 'bg-danger';
+                    textColorClass = 'text-danger';
+                    statusCard.classList.add('bg-red-50', 'border-danger');
+                    break;
+                default:
+                    statusText = '初始化中...';
+            }
 
-const totalInput = document.getElementById('totalAmount');
-const ymInput = document.getElementById('amountYM');
-const olInput = document.getElementById('amountOL');
+            // 更新 UI
+            statusIndicator.classList.add(bgColorClass);
+            connectionStatusElement.textContent = statusText;
+            connectionStatusElement.classList.remove('text-gray-600', 'text-success', 'text-danger', 'text-warning');
+            connectionStatusElement.classList.add(textColorClass);
+            
+            if (userId) {
+                userIdDisplay.innerHTML = `使用者 ID: <span class="font-bold text-gray-700">${userId}</span>`;
+            } else {
+                userIdDisplay.textContent = '使用者 ID: 尚未登入';
+            }
+        };
 
-// 其中一欄輸入後另一欄自動算
-ymInput.addEventListener('input', () => {
-  const total = parseFloat(totalInput.value) || 0;
-  const ym = parseFloat(ymInput.value) || 0;
-  olInput.value = total - ym;
-});
 
-olInput.addEventListener('input', () => {
-  const total = parseFloat(totalInput.value) || 0;
-  const ol = parseFloat(olInput.value) || 0;
-  ymInput.value = total - ol;
-});
+        // --- 主要初始化邏輯 ---
+        
+        const initFirebase = async () => {
+            // 檢查配置是否完整 (這裡僅檢查 API Key, 實際應用中應檢查所有必要字段)
+            if (firebaseConfig.apiKey === "YOUR_API_KEY") {
+                const msg = '錯誤：請將程式碼中的 "firebaseConfig" 替換為您自己的 Firebase 專案配置資訊。';
+                console.error(msg);
+                setConnectionStatus('error', '配置錯誤 (YOUR_API_KEY 未替換)');
+                showModal(msg);
+                return;
+            }
 
-// Firebase SDK from CDN
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js";
+            try {
+                // 1. 初始化 Firebase 應用程式
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                
+                setConnectionStatus('connecting'); 
 
-// Firebase Config
-const firebaseConfig = {
-  apiKey: "AIzaSyCRHx0i02nojkN5-y5HxS3P3i1jA5SEy8E",
-  authDomain: "hnm-spliter.firebaseapp.com",
-  projectId: "hnm-spliter",
-  storageBucket: "hnm-spliter.firebasestorage.app",
-  messagingSenderId: "514297368344",
-  appId: "1:514297368344:web:a9ee0cb370cddc1b6e986d",
-  measurementId: "G-4DY12810X8"
-};
+                // 2. 設置身份驗證狀態監聽器
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        // 登入成功
+                        setConnectionStatus('connected', `已成功登入 (匿名)`, user.uid);
+                        console.log("Firebase 匿名登入成功. User ID:", user.uid);
+                    } else {
+                        // 登出或初始狀態
+                        // 如果是第一次載入，嘗試登入
+                        if (auth.currentUser === null) {
+                             attemptAnonymousSignIn(auth);
+                        } else {
+                            // 登出狀態
+                            setConnectionStatus('error', '已登出或會話過期');
+                            console.warn("Firebase 登出或會話過期.");
+                        }
+                    }
+                });
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+            } catch (error) {
+                // 初始化失敗
+                const msg = `Firebase 初始化失敗: ${error.message}`;
+                console.error(msg, error);
+                setConnectionStatus('error', '初始化錯誤');
+                showModal(msg);
+            }
+        };
 
-// 匿名登入
-async function anonymousLogin() {
-  try {
-    const userCredential = await signInAnonymously(auth);
-    console.log("匿名登入成功 UID:", userCredential.user.uid);
-  } catch (error) {
-    console.error("匿名登入失敗:", error);
-  }
-}
-anonymousLogin();
+        // 嘗試匿名登入
+        const attemptAnonymousSignIn = async (auth) => {
+            setConnectionStatus('connecting', '嘗試匿名登入...');
+            try {
+                // 執行匿名登入
+                await signInAnonymously(auth);
+                // onAuthStateChanged 會捕捉成功狀態，無需在此處再次呼叫 setConnectionStatus('connected')
+            } catch (error) {
+                // 匿名登入失敗
+                const msg = `匿名登入失敗！請確認 Firebase 專案中已啟用 "匿名" 登入方式。錯誤代碼: ${error.code}`;
+                console.error(msg, error);
+                setConnectionStatus('error', '匿名登入失敗');
+                showModal(msg);
+            }
+        };
 
-// TODO: 實作 firestore 儲存、讀取最近五筆、計算欠款
-</script>
-
+        // 啟動應用程式
+        window.onload = initFirebase;
+        
+    </script>
 </body>
 </html>
