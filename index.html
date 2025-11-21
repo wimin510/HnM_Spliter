@@ -3,15 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Firebase 匿名登入與狀態顯示</title>
+    <title>無賴帳本 HnM Spliter</title>
     <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 設置字體為 Inter -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f3f4f6;
+        }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
         }
     </style>
     <script>
@@ -20,47 +28,154 @@
                 extend: {
                     colors: {
                         'primary': '#4f46e5',
-                        'success': '#10b981',
-                        'danger': '#ef4444',
-                        'warning': '#f59e0b',
+                        'secondary': '#10b981', // 成功/優勢
+                        'danger': '#ef4444',    // 劣勢/錯誤
+                        'warning': '#f59e0b',   // 連線中
                     }
                 }
             }
         }
     </script>
 </head>
-<body class="p-4 sm:p-8 flex items-center justify-center min-h-screen">
-    <div class="w-full max-w-lg bg-white p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
-        <h1 class="text-3xl font-bold text-center text-gray-800 border-b pb-3">
-            Firebase 匿名登入狀態
-        </h1>
-
-        <!-- 連線狀態卡片 -->
-        <div id="status-card" class="p-4 rounded-xl shadow-lg transition-all duration-300 bg-gray-100 border border-gray-200">
-            <h2 class="text-lg font-semibold mb-2 text-gray-700">連線/登入狀態</h2>
-            <div class="flex items-center space-x-3">
-                <div id="status-indicator" class="w-4 h-4 rounded-full bg-gray-400 animate-pulse"></div>
-                <p id="connection-status" class="text-gray-600 font-medium">初始化中...</p>
+<body class="p-4 sm:p-6 md:p-8">
+    <div id="app" class="max-w-xl mx-auto space-y-6">
+        <h1 class="text-3xl font-extrabold text-center text-gray-800">無賴帳本 📝</h1>
+        
+        <!-- 連線狀態 & User ID -->
+        <div id="status-card" class="p-3 rounded-xl shadow-md transition-all duration-300 bg-gray-100 border border-gray-200">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <div id="status-indicator" class="w-3 h-3 rounded-full bg-gray-400 animate-pulse"></div>
+                    <p id="connection-status" class="text-sm font-semibold text-gray-600">初始化中...</p>
+                </div>
+                <p class="text-xs text-gray-500 font-mono" id="user-info">UserID: 載入中...</p>
             </div>
-            
-            <p id="user-id-display" class="text-sm font-mono text-gray-500 mt-3 break-all">
-                使用者 ID: 尚未登入
-            </p>
+        </div>
+        
+        <!-- 欠款狀態顯示 (固定以 TWD 顯示) -->
+        <div id="balance-card" class="p-6 rounded-xl shadow-lg transition-all duration-300 bg-gray-400 text-white">
+            <h2 class="text-lg font-semibold mb-2" id="balance-status-text">載入中...</h2>
+            <p class="text-4xl font-extrabold" id="balance-amount">--</p>
+            <p class="text-sm mt-1" id="balance-currency-info"></p>
         </div>
 
-        <!-- 功能區塊 (模擬應用程式內容) -->
-        <div class="p-4 border-t border-gray-200 pt-6">
-            <h2 class="text-xl font-semibold mb-3 text-gray-800">應用程式內容 (匿名可用)</h2>
-            <p class="text-gray-600">
-                您已成功建立一個可以跨裝置使用的應用程式基底。匿名登入讓每個使用者擁有獨立的 ID 來儲存資料。
-            </p>
+        <!-- 匯率顯示 -->
+        <div id="rates-card" class="bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-lg font-semibold mb-2 text-gray-800">即時匯率 (兌 TWD)</h2>
+            <div id="rates-display" class="text-sm space-y-1">
+                <p class="text-gray-500">載入中...</p>
+            </div>
+        </div>
+
+        <!-- 名稱設定區塊 -->
+        <div class="bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+            <button id="toggle-settings" class="w-full flex justify-between items-center text-left text-lg font-semibold text-gray-800 focus:outline-none py-1">
+                <span>名稱設定 (H:我 / M:夥伴)</span>
+                <svg id="settings-chevron" class="w-5 h-5 transition-transform duration-300 transform" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                </svg>
+            </button>
+            <div id="settings-content" class="mt-4 space-y-4 hidden">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="h-name-input" class="block text-sm font-medium text-gray-700">我的名稱 (H)</label>
+                        <input type="text" id="h-name-input" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., John">
+                    </div>
+                    <div>
+                        <label for="m-name-input" class="block text-sm font-medium text-gray-700">夥伴名稱 (M)</label>
+                        <input type="text" id="m-name-input" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., Mary">
+                    </div>
+                </div>
+                <button id="save-names-btn" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-secondary hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary transition duration-150 ease-in-out">
+                    儲存名稱設定
+                </button>
+            </div>
+        </div>
+        
+        <!-- 記錄表單 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">新增紀錄</h2>
+            <form id="expense-form" class="space-y-4">
+                
+                <!-- 幣別選擇 -->
+                <div>
+                    <label for="currency" class="block text-sm font-medium text-gray-700">幣別</label>
+                    <select id="currency" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="TWD">新台幣 (TWD)</option>
+                        <option value="JPY">日幣 (JPY)</option>
+                        <option value="USD">美元 (USD)</option>
+                    </select>
+                </div>
+
+                <!-- 總金額 & 日期 -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="totalAmount" class="block text-sm font-medium text-gray-700">總金額</label>
+                        <input type="number" id="totalAmount" step="0.01" min="0" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                    <div>
+                        <label for="recordDate" class="block text-sm font-medium text-gray-700">日期</label>
+                        <input type="date" id="recordDate" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                    </div>
+                </div>
+
+                <!-- 付款人 -->
+                <div>
+                    <label for="payer" class="block text-sm font-medium text-gray-700">付款人</label>
+                    <select id="payer" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="H">我 (Me)</option>
+                        <option value="M">夥伴 (Partner)</option>
+                    </select>
+                </div>
+
+                <!-- 描述 -->
+                <div>
+                    <label for="description" class="block text-sm font-medium text-gray-700">描述 (e.g., 晚餐)</label>
+                    <input type="text" id="description" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="e.g., 晚餐">
+                </div>
+
+                <!-- 分帳方式 -->
+                <div>
+                    <label for="splitType" class="block text-sm font-medium text-gray-700">分帳方式</label>
+                    <select id="splitType" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2">
+                        <option value="equal">均分 (Equal)</option>
+                        <option value="custom">自訂金額 (Custom)</option>
+                    </select>
+                </div>
+
+                <!-- 自訂金額分配 (Custom Split) -->
+                <div id="custom-split-fields" class="grid grid-cols-2 gap-4 hidden">
+                    <div>
+                        <label for="amountH" class="block text-sm font-medium text-gray-700">我 (H) 應付金額</label>
+                        <input type="number" id="amountH" step="0.01" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                    <div>
+                        <label for="amountM" class="block text-sm font-medium text-gray-700">夥伴 (M) 應付金額</label>
+                        <input type="number" id="amountM" step="0.01" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary p-2" placeholder="0">
+                    </div>
+                </div>
+
+                <!-- 提交按鈕 -->
+                <button type="submit" id="submit-expense-btn" class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition duration-150 ease-in-out">
+                    儲存紀錄
+                </button>
+            </form>
+            <div id="error-message" class="text-danger text-sm mt-3 hidden p-2 bg-red-50 rounded-md"></div>
+        </div>
+
+        <!-- 最近五筆紀錄 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">最近紀錄</h2>
+            <ul id="recent-records" class="space-y-3">
+                <li class="text-gray-500 text-center py-4" id="loading-records">連線成功後載入紀錄...</li>
+            </ul>
         </div>
     </div>
 
     <!-- 模組化錯誤提示框 (用於取代 alert()) -->
     <div id="modal-container" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50">
         <div class="bg-white p-6 rounded-lg shadow-xl w-96 max-w-full m-4">
-            <h3 class="text-xl font-bold text-danger mb-3">錯誤通知</h3>
+            <h3 class="text-xl font-bold text-danger mb-3" id="modal-title">錯誤通知</h3>
             <p id="modal-message" class="text-gray-700 text-sm"></p>
             <div class="mt-4 text-right">
                 <button onclick="document.getElementById('modal-container').classList.add('hidden')" class="px-4 py-2 bg-primary text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition">
@@ -79,9 +194,21 @@
             signInAnonymously, 
             onAuthStateChanged 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc,
+            addDoc, 
+            onSnapshot, 
+            collection, 
+            query, 
+            limit,
+            serverTimestamp,
+            getDoc,
+            setLogLevel 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        // --- 替換為您自己的 Firebase 配置資訊 ---
-        // 注意：為了在 GitHub Pages 上運行，您必須在這裡手動填寫您的配置
+        // --- Firebase 配置 ---
         const firebaseConfig = {
             // 已替換為您提供的配置
             apiKey: "AIzaSyCRHx0i02nojkN5-y5HxS3P3i1jA5SEy8E", 
@@ -94,29 +221,81 @@
         };
         // ------------------------------------
 
+        // --- 匯率 API 配置 ---
+        const FRANKFURTER_API = 'https://api.frankfurter.dev/latest';
+        const BASE_CURRENCY = 'TWD'; // 統一的計算基礎幣別
+        const TARGET_CURRENCIES = ['JPY', 'USD']; // 需要獲取對 TWD 匯率的幣別
+        // ------------------------------------
+
+        // --- 全域狀態與變數 ---
+        let app, db, auth, userId = null;
+        let isAuthReady = false;
+        let EXCHANGE_RATES = null; // 儲存 (1 TWD = X Foreign Currency) 的匯率
+        let RATES_LOADING = false;
+        
+        // 使用固定的 APP_ID 確保資料共享
+        const APP_ID = 'hnm-spliter-public-app'; 
+        const USER_PARTY = 'H'; // 假設當前使用者是 H (我)
+        const PARTNER_PARTY = 'M';
+        let PARTY_NAMES = {
+            'H': '我 (Me)', // 預設名稱
+            'M': '夥伴 (Partner)', // 預設名稱
+        };
+        
         // --- DOM 元素 ---
         const connectionStatusElement = document.getElementById('connection-status');
         const statusIndicator = document.getElementById('status-indicator');
-        const userIdDisplay = document.getElementById('user-id-display');
+        const userInfoElement = document.getElementById('user-info');
         const statusCard = document.getElementById('status-card');
+        
+        const totalAmountInput = document.getElementById('totalAmount');
+        const amountHInput = document.getElementById('amountH');
+        const amountMInput = document.getElementById('amountM');
+        const splitTypeSelect = document.getElementById('splitType');
+        const customSplitFields = document.getElementById('custom-split-fields');
+        const expenseForm = document.getElementById('expense-form');
+        const recentRecordsList = document.getElementById('recent-records');
+        const balanceCard = document.getElementById('balance-card');
+        const balanceStatusText = document.getElementById('balance-status-text');
+        const balanceAmountElement = document.getElementById('balance-amount');
+        const balanceCurrencyInfo = document.getElementById('balance-currency-info');
+        const errorMessageElement = document.getElementById('error-message');
+        const submitExpenseBtn = document.getElementById('submit-expense-btn');
+
+        const ratesCard = document.getElementById('rates-card');
+        const ratesDisplay = document.getElementById('rates-display');
+
+        // 名稱設定 DOM
+        const hNameInput = document.getElementById('h-name-input');
+        const mNameInput = document.getElementById('m-name-input');
+        const saveNamesBtn = document.getElementById('save-names-btn');
+        const toggleSettingsBtn = document.getElementById('toggle-settings');
+        const settingsContent = document.getElementById('settings-content');
+        const settingsChevron = document.getElementById('settings-chevron');
+        const payerSelect = document.getElementById('payer');
+        
+        // 設置預設日期為今天
+        document.getElementById('recordDate').valueAsDate = new Date();
+
 
         // --- 輔助函式 ---
-
+        
         // 顯示模組化提示框
-        const showModal = (message) => {
+        const showModal = (message, title = '錯誤或提示') => {
+            document.getElementById('modal-title').textContent = title;
             document.getElementById('modal-message').textContent = message;
             document.getElementById('modal-container').classList.remove('hidden');
         };
 
         // 更新連線狀態顯示
-        const setConnectionStatus = (status, message = '', userId = null) => {
+        const setConnectionStatus = (status, message = '', uid = null) => {
             let bgColorClass = 'bg-gray-400';
             let textColorClass = 'text-gray-600';
             let statusText = message || '未知狀態';
             
             // 重置樣式
-            statusIndicator.classList.remove('bg-gray-400', 'bg-success', 'bg-danger', 'bg-warning', 'animate-pulse');
-            statusCard.classList.remove('bg-gray-100', 'bg-green-50', 'bg-red-50', 'border-gray-200', 'border-success', 'border-danger');
+            statusIndicator.classList.remove('bg-gray-400', 'bg-secondary', 'bg-danger', 'bg-warning', 'animate-pulse');
+            statusCard.classList.remove('bg-gray-100', 'bg-green-50', 'bg-red-50', 'border-gray-200', 'border-secondary', 'border-danger');
 
             switch (status) {
                 case 'connecting':
@@ -125,101 +304,601 @@
                     textColorClass = 'text-warning';
                     statusIndicator.classList.add('animate-pulse');
                     statusCard.classList.add('bg-gray-100', 'border-warning');
+                    submitExpenseBtn.disabled = true;
+                    saveNamesBtn.disabled = true;
                     break;
                 case 'connected':
                     statusText = '已成功登入 (匿名)';
-                    bgColorClass = 'bg-success';
-                    textColorClass = 'text-success';
-                    statusCard.classList.add('bg-green-50', 'border-success');
+                    bgColorClass = 'bg-secondary';
+                    textColorClass = 'text-secondary';
+                    statusCard.classList.add('bg-green-50', 'border-secondary');
+                    // 只有在匯率載入完成後才啟用按鈕
+                    submitExpenseBtn.disabled = RATES_LOADING || !EXCHANGE_RATES;
+                    saveNamesBtn.disabled = false;
                     break;
                 case 'error':
                     statusText = message || '連線或登入失敗';
                     bgColorClass = 'bg-danger';
                     textColorClass = 'text-danger';
                     statusCard.classList.add('bg-red-50', 'border-danger');
+                    submitExpenseBtn.disabled = true;
+                    saveNamesBtn.disabled = true;
                     break;
                 default:
                     statusText = '初始化中...';
+                    submitExpenseBtn.disabled = true;
+                    saveNamesBtn.disabled = true;
             }
 
             // 更新 UI
             statusIndicator.classList.add(bgColorClass);
             connectionStatusElement.textContent = statusText;
-            connectionStatusElement.classList.remove('text-gray-600', 'text-success', 'text-danger', 'text-warning');
+            connectionStatusElement.classList.remove('text-gray-600', 'text-secondary', 'text-danger', 'text-warning');
             connectionStatusElement.classList.add(textColorClass);
             
-            if (userId) {
-                userIdDisplay.innerHTML = `使用者 ID: <span class="font-bold text-gray-700">${userId}</span>`;
+            if (uid) {
+                userInfoElement.textContent = `UserID: ${uid.substring(0, 4)}...`;
             } else {
-                userIdDisplay.textContent = '使用者 ID: 尚未登入';
+                userInfoElement.textContent = 'UserID: 尚未登入';
+            }
+        };
+
+        // 處理 Firebase 錯誤
+        const handleFirebaseError = (error, action = '操作') => {
+            console.error(`Firebase 錯誤 [${action}]:`, error);
+            const msg = `[${action}失敗] 錯誤代碼: ${error.code || '未知'}. 請檢查您的 Firebase 規則或稍後再試。`;
+            showModal(msg);
+        };
+
+        // 獲取貨幣符號
+        const getCurrencySymbol = (currency) => {
+            switch (currency) {
+                case 'TWD': return 'NT$';
+                case 'JPY': return '¥';
+                case 'USD': return '$';
+                default: return '';
+            }
+        };
+        
+        // --- 資料庫路徑 (修復路徑片段數量錯誤) ---
+        // 使用 apps/{APP_ID}/transactions 作為 Collection (3 segments)
+        const getExpensesCollectionRef = () => {
+            return collection(db, `apps/${APP_ID}/transactions`);
+        };
+
+        // 使用 apps/{APP_ID}/metadata/balance 作為 Document (4 segments)
+        const getBalanceDocRef = () => {
+            return doc(db, `apps/${APP_ID}/metadata/balance`);
+        };
+        
+        // 使用 apps/{APP_ID}/metadata/partyNames 作為 Document (4 segments, 修正了原本 5 segments 的錯誤)
+        const getSettingsDocRef = () => {
+            return doc(db, `apps/${APP_ID}/metadata/partyNames`);
+        };
+
+
+        // --- 匯率邏輯 ---
+
+        // 獲取轉換率 (1 單位 Foreign Currency = X TWD)
+        const getConversionRateToTWD = (currency) => {
+            if (currency === BASE_CURRENCY) return 1;
+            
+            if (!EXCHANGE_RATES || !EXCHANGE_RATES[currency]) {
+                // 如果匯率未載入或缺少，則無法計算跨幣別交易
+                console.warn(`Missing exchange rate for ${currency}. Conversion will fail.`);
+                return 0; 
+            }
+            
+            // EXCHANGE_RATES 儲存的是 (1 TWD = X 外幣) 的匯率
+            // 我們需要的是 (1 外幣 = 1/X TWD) 的匯率
+            const rate = 1 / EXCHANGE_RATES[currency];
+            return rate;
+        };
+
+        // 獲取即時匯率
+        const fetchExchangeRates = async (retries = 3) => {
+            RATES_LOADING = true;
+            ratesDisplay.innerHTML = '<p class="text-warning animate-pulse">連線中...</p>';
+            
+            // 獲取 TWD 到 JPY 和 USD 的匯率 (即 1 TWD = ? JPY, 1 TWD = ? USD)
+            const url = `${FRANKFURTER_API}?from=${BASE_CURRENCY}&to=${TARGET_CURRENCIES.join(',')}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.rates) {
+                    EXCHANGE_RATES = data.rates;
+                    EXCHANGE_RATES[BASE_CURRENCY] = 1; // 基礎幣別 TWD 的匯率是 1
+                    renderExchangeRates();
+                    RATES_LOADING = false;
+                    // 匯率載入完成後，如果已登入，啟用按鈕
+                    if (auth.currentUser) submitExpenseBtn.disabled = false;
+                } else {
+                    throw new Error('API response missing rates data.');
+                }
+
+            } catch (error) {
+                console.error('Fetch Rates Error:', error);
+                
+                if (retries > 0) {
+                    console.log(`Retrying fetch rates... (${retries} attempts left)`);
+                    // 指數退避 (Exponential backoff)
+                    await new Promise(resolve => setTimeout(resolve, (4 - retries) * 1000));
+                    await fetchExchangeRates(retries - 1);
+                } else {
+                    RATES_LOADING = false;
+                    ratesDisplay.innerHTML = `<p class="text-danger font-semibold">匯率載入失敗。跨幣別交易將不被計算。</p>`;
+                    // 設定預設 rates 為 null，觸發表單提交的錯誤提示
+                    EXCHANGE_RATES = null; 
+                    if (auth.currentUser) submitExpenseBtn.disabled = true;
+                    showModal('無法獲取最新匯率。應用程式將無法執行跨幣別計算。請稍後重試。', '匯率錯誤');
+                }
+            }
+        };
+
+        // 渲染匯率顯示
+        const renderExchangeRates = () => {
+            if (!EXCHANGE_RATES) return;
+            
+            // 顯示的是 1 單位外幣 兌換多少 TWD (即我們計算所需的反向匯率)
+            let html = '';
+            
+            // 避免除以零或匯率不存在
+            const rateToTWD_JPY = EXCHANGE_RATES.JPY ? (1 / EXCHANGE_RATES.JPY).toFixed(4) : 'N/A';
+            const rateToTWD_USD = EXCHANGE_RATES.USD ? (1 / EXCHANGE_RATES.USD).toFixed(4) : 'N/A';
+
+            html += `<p class="text-gray-700 font-medium">1 JPY = ${rateToTWD_JPY} TWD</p>`;
+            html += `<p class="text-gray-700 font-medium">1 USD = ${rateToTWD_USD} TWD</p>`;
+            html += `<p class="text-xs text-gray-400 mt-2">資料來源: Frankfurter API (基礎幣 TWD)</p>`;
+            
+            ratesDisplay.innerHTML = html;
+        };
+
+
+        // --- Firebase 認證邏輯 ---
+        
+        const attemptAnonymousSignIn = async (authInstance) => {
+            setConnectionStatus('connecting', '嘗試匿名登入...');
+            try {
+                // 執行匿名登入
+                await signInAnonymously(authInstance);
+            } catch (error) {
+                // 匿名登入失敗
+                const msg = `匿名登入失敗！請確認 Firebase 專案中已啟用 "匿名" 登入方式。錯誤代碼: ${error.code}`;
+                handleFirebaseError(error, '匿名登入');
+                setConnectionStatus('error', '匿名登入失敗');
             }
         };
 
 
-        // --- 主要初始化邏輯 ---
-        
         const initFirebase = async () => {
-            // 檢查配置是否完整 (這裡僅檢查 API Key, 實際應用中應檢查所有必要字段)
-            if (firebaseConfig.apiKey === "YOUR_API_KEY") {
-                const msg = '錯誤：請將程式碼中的 "firebaseConfig" 替換為您自己的 Firebase 專案配置資訊。';
-                console.error(msg);
-                setConnectionStatus('error', '配置錯誤 (YOUR_API_KEY 未替換)');
-                showModal(msg);
-                return;
-            }
-
             try {
                 // 1. 初始化 Firebase 應用程式
-                const app = initializeApp(firebaseConfig);
-                const auth = getAuth(app);
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                setLogLevel('error'); // 僅記錄錯誤，保持控制台整潔
                 
+                // 啟動匯率獲取 (不需等待身份驗證)
+                await fetchExchangeRates();
+
                 setConnectionStatus('connecting'); 
 
                 // 2. 設置身份驗證狀態監聽器
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
-                        // 登入成功
-                        setConnectionStatus('connected', `已成功登入 (匿名)`, user.uid);
-                        console.log("Firebase 匿名登入成功. User ID:", user.uid);
+                        userId = user.uid;
+                        isAuthReady = true;
+                        setConnectionStatus('connected', null, user.uid);
+                        // 身份驗證完成後，啟動資料監聽
+                        setupDataListeners();
+                        // 確保匯率載入完成後按鈕啟用
+                        if (!RATES_LOADING && EXCHANGE_RATES) submitExpenseBtn.disabled = false;
                     } else {
-                        // 登出或初始狀態
+                        isAuthReady = false;
                         // 如果是第一次載入，嘗試登入
-                        if (auth.currentUser === null) {
+                        if (!auth.currentUser) {
                              attemptAnonymousSignIn(auth);
                         } else {
-                            // 登出狀態
                             setConnectionStatus('error', '已登出或會話過期');
-                            console.warn("Firebase 登出或會話過期.");
                         }
                     }
                 });
 
             } catch (error) {
                 // 初始化失敗
-                const msg = `Firebase 初始化失敗: ${error.message}`;
-                console.error(msg, error);
+                handleFirebaseError(error, '初始化');
                 setConnectionStatus('error', '初始化錯誤');
-                showModal(msg);
             }
         };
 
-        // 嘗試匿名登入
-        const attemptAnonymousSignIn = async (auth) => {
-            setConnectionStatus('connecting', '嘗試匿名登入...');
+
+        // --- 資料庫操作與監聽 ---
+
+        // 設置即時資料監聽器
+        const setupDataListeners = () => {
+            if (!isAuthReady || !db) return;
+
+            // 1. 監聽名稱設定
+            setupNamesListener();
+
+            // 2. 監聽最近五筆紀錄 (按時間降序排序)
+            const qRecords = query(getExpensesCollectionRef(), limit(10));
+            onSnapshot(qRecords, (snapshot) => {
+                const records = [];
+                snapshot.forEach(doc => {
+                    records.push({ id: doc.id, ...doc.data(), 
+                        // 將 Firestore Timestamp 轉換為日期字串
+                        recordTimestamp: doc.data().recordTimestamp?.toDate().toISOString().split('T')[0] || 'N/A' 
+                    });
+                });
+                
+                // 客戶端排序：按日期時間戳降序
+                records.sort((a, b) => {
+                    // 使用 recordDate 作為排序依據
+                    const dateA = new Date(a.recordDate).getTime();
+                    const dateB = new Date(b.recordDate).getTime();
+                    
+                    // 次要排序：使用 recordTimestamp (如果存在，但我們不一定能獲取到，所以主要依靠 dateB - dateA)
+                    return dateB - dateA; 
+                });
+                
+                renderRecentRecords(records); 
+            }, (error) => handleFirebaseError(error, '監聽紀錄'));
+
+            // 3. 監聽總欠款狀態
+            onSnapshot(getBalanceDocRef(), (docSnapshot) => {
+                if (docSnapshot.exists()) {
+                    const balanceData = docSnapshot.data();
+                    // 總欠款 balance 已經固定為 TWD 單位
+                    const balance = balanceData.balance || 0;
+                    const currency = balanceData.currency || BASE_CURRENCY;
+                    renderBalance(balance, currency);
+                } else {
+                    renderBalance(0, BASE_CURRENCY);
+                }
+            }, (error) => handleFirebaseError(error, '監聽欠款'));
+        };
+
+        // 監聽名稱設定
+        const setupNamesListener = () => {
+            onSnapshot(getSettingsDocRef(), (docSnapshot) => {
+                let changed = false;
+                if (docSnapshot.exists()) {
+                    const names = docSnapshot.data();
+                    if (names.HName && PARTY_NAMES['H'] !== names.HName) {
+                        PARTY_NAMES['H'] = names.HName;
+                        changed = true;
+                    }
+                    if (names.MName && PARTY_NAMES['M'] !== names.MName) {
+                        PARTY_NAMES['M'] = names.MName;
+                        changed = true;
+                    }
+                }
+                
+                // 無論是否改變，都要確保 UI 反映最新狀態或預設值
+                updatePartyNamesUI();
+                
+            }, (error) => console.error('監聽名稱設定失敗:', error));
+        };
+
+        // --- UI 渲染功能 ---
+        
+        // 更新所有使用 H/M 名稱的 UI 元素
+        const updatePartyNamesUI = () => {
+            // 1. 更新名稱設定輸入框 (如果不是當前編輯狀態)
+            if (document.activeElement !== hNameInput) hNameInput.value = PARTY_NAMES['H'];
+            if (document.activeElement !== mNameInput) mNameInput.value = PARTY_NAMES['M'];
+
+            // 2. 更新付款人下拉選單
+            if (payerSelect.options[0]) payerSelect.options[0].textContent = PARTY_NAMES['H'];
+            if (payerSelect.options[1]) payerSelect.options[1].textContent = PARTY_NAMES['M'];
+            
+            // 3. 更新自訂金額的標籤
+            document.querySelector('label[for="amountH"]').textContent = `${PARTY_NAMES['H']} (H) 應付金額`;
+            document.querySelector('label[for="amountM"]').textContent = `${PARTY_NAMES['M']} (M) 應付金額`;
+            
+            // 4. 強制重新渲染欠款狀態以更新名稱
+            // 由於 balance 的 onSnapshot 不一定會立即觸發，我們手動更新一次
+            const balanceAmount = parseFloat(balanceAmountElement.textContent.replace(/[^\d.-]/g, '')) || 0;
+            // balance 一定是 BASE_CURRENCY (TWD)
+            renderBalance(balanceAmount * (balanceStatusText.textContent.includes('欠') ? -1 : 1), BASE_CURRENCY);
+        };
+
+
+        // 渲染欠款狀態
+        const renderBalance = (balance, currency) => {
+            // 總欠款固定為 TWD 
+            const fixedCurrency = BASE_CURRENCY; 
+            const isOwed = balance > 0;
+            const isDebt = balance < 0;
+            // 總欠款四捨五入到小數點第二位
+            const absBalance = Math.abs(balance).toFixed(2); 
+            const currencySymbol = getCurrencySymbol(fixedCurrency);
+            
+            balanceCard.classList.remove('bg-secondary', 'bg-danger', 'bg-gray-400');
+
+            if (isOwed) {
+                // M 欠 H (我方優勢)
+                balanceCard.classList.add('bg-secondary'); 
+                balanceStatusText.textContent = `${PARTY_NAMES[PARTNER_PARTY]} 欠 ${PARTY_NAMES[USER_PARTY]} (我方優勢)`;
+            } else if (isDebt) {
+                // H 欠 M (我方劣勢)
+                balanceCard.classList.add('bg-danger'); 
+                balanceStatusText.textContent = `${PARTY_NAMES[USER_PARTY]} 欠 ${PARTY_NAMES[PARTNER_PARTY]} (我方劣勢)`;
+            } else {
+                // 結清
+                balanceCard.classList.add('bg-gray-400');
+                balanceStatusText.textContent = `目前已結清`;
+            }
+
+            balanceAmountElement.textContent = `${currencySymbol} ${absBalance}`;
+            balanceCurrencyInfo.textContent = `幣別: ${fixedCurrency} (統一計算幣別)`;
+        };
+
+        // 渲染最近紀錄
+        const renderRecentRecords = (records) => {
+            recentRecordsList.innerHTML = ''; // 清空列表
+            if (records.length === 0) {
+                recentRecordsList.innerHTML = '<li class="text-gray-500 text-center py-4">目前沒有任何紀錄。</li>';
+                return;
+            }
+
+            records.forEach(record => {
+                const currencySymbol = getCurrencySymbol(record.currency);
+                
+                let amountText = '';
+                
+                if (record.splitType === 'equal') {
+                    const splitAmount = (record.totalAmount / 2).toFixed(2);
+                    amountText = `總額: ${currencySymbol} ${record.totalAmount.toFixed(2)} | 均攤: ${currencySymbol} ${splitAmount}`;
+                } else {
+                    const H_Paid = record.amountH || 0;
+                    const M_Paid = record.amountM || 0;
+                    amountText = `${PARTY_NAMES[USER_PARTY]}應付: ${currencySymbol} ${H_Paid.toFixed(2)}, ${PARTY_NAMES[PARTNER_PARTY]}應付: ${currencySymbol} ${M_Paid.toFixed(2)}`;
+                }
+
+                // 新增匯率資訊
+                let conversionInfo = '';
+                if (record.currency !== BASE_CURRENCY && record.conversionRate && record.netDebtChangeTWD !== undefined) {
+                    // 轉換率是 1 單位外幣 兌換多少 TWD
+                    conversionInfo = `
+                        <p class="text-xs text-warning mt-1">匯率: 1 ${record.currency} = ${record.conversionRate.toFixed(4)} TWD</p>
+                        <p class="text-xs text-gray-400">TWD 淨欠款變動: NT$ ${record.netDebtChangeTWD.toFixed(2)}</p>
+                    `;
+                }
+
+
+                const listItem = document.createElement('li');
+                listItem.className = 'flex justify-between items-start p-3 bg-gray-50 rounded-lg shadow-sm hover:bg-gray-100 transition duration-150';
+                listItem.innerHTML = `
+                    <div class="flex-grow">
+                        <p class="text-sm font-semibold">${record.description}</p>
+                        <p class="text-xs text-gray-500 mt-1">${new Date(record.recordDate).toLocaleDateString()} / 付款人: ${PARTY_NAMES[record.payer]} (${record.currency})</p>
+                        ${conversionInfo}
+                    </div>
+                    <div class="text-right ml-4">
+                        <p class="text-sm font-medium text-gray-800">${amountText}</p>
+                        <p class="text-xs text-gray-400 mt-1">${record.splitType === 'equal' ? '均分' : '自訂'}</p>
+                    </div>
+                `;
+                recentRecordsList.appendChild(listItem);
+            });
+        };
+
+        // --- 事件監聽器 ---
+
+        // 名稱設定儲存
+        saveNamesBtn.addEventListener('click', async () => {
+            const HName = hNameInput.value.trim();
+            const MName = mNameInput.value.trim();
+
+            if (!HName || !MName) {
+                showModal('請輸入雙方的名稱。');
+                return;
+            }
+            if (!isAuthReady) {
+                 showModal('資料庫尚未連線，請稍候再試。');
+                return;
+            }
+
             try {
-                // 執行匿名登入
-                await signInAnonymously(auth);
-                // onAuthStateChanged 會捕捉成功狀態，無需在此處再次呼叫 setConnectionStatus('connected')
+                // setDoc 使用 getSettingsDocRef()，現已修復為 4 個路徑片段
+                await setDoc(getSettingsDocRef(), {
+                    HName: HName,
+                    MName: MName,
+                    lastUpdated: serverTimestamp(),
+                }, { merge: true });
+                
+                // onSnapshot 會自動更新 PARTY_NAMES 和 UI，但我們手動收起面板
+                showModal('名稱已成功儲存並同步！', '儲存成功');
+                
+                settingsContent.classList.add('hidden');
+                settingsChevron.classList.remove('rotate-180');
+                
             } catch (error) {
-                // 匿名登入失敗
-                const msg = `匿名登入失敗！請確認 Firebase 專案中已啟用 "匿名" 登入方式。錯誤代碼: ${error.code}`;
-                console.error(msg, error);
-                setConnectionStatus('error', '匿名登入失敗');
-                showModal(msg);
+                handleFirebaseError(error, '儲存名稱');
             }
-        };
+        });
 
-        // 啟動應用程式
+        // 展開/收合設定區塊
+        toggleSettingsBtn.addEventListener('click', () => {
+            settingsContent.classList.toggle('hidden');
+            settingsChevron.classList.toggle('rotate-180');
+        });
+
+
+        // 均分/自訂 切換邏輯
+        splitTypeSelect.addEventListener('change', () => {
+            if (splitTypeSelect.value === 'custom') {
+                customSplitFields.classList.remove('hidden');
+                updateCustomSplit(totalAmountInput); 
+            } else {
+                customSplitFields.classList.add('hidden');
+                amountHInput.value = '';
+                amountMInput.value = '';
+            }
+        });
+
+        // 自訂金額自動計算邏輯
+        totalAmountInput.addEventListener('input', () => updateCustomSplit(totalAmountInput));
+        amountHInput.addEventListener('input', () => updateCustomSplit(amountHInput));
+        amountMInput.addEventListener('input', () => updateCustomSplit(amountMInput));
+
+        function updateCustomSplit(changedInput) {
+            if (splitTypeSelect.value !== 'custom') return;
+
+            const total = parseFloat(totalAmountInput.value) || 0;
+            
+            if (changedInput === amountHInput) {
+                const amountH = parseFloat(amountHInput.value) || 0;
+                const remaining = total - amountH;
+                amountMInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            } else if (changedInput === amountMInput) {
+                const amountM = parseFloat(amountMInput.value) || 0;
+                const remaining = total - amountM;
+                amountHInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            } else if (changedInput === totalAmountInput) {
+                 // 總金額變更時，自動更新M的金額以補足差額 (保持H不變)
+                 const amountH = parseFloat(amountHInput.value) || 0;
+                 const remaining = total - amountH;
+                 amountMInput.value = remaining >= 0 ? remaining.toFixed(2) : 0.00;
+            }
+        }
+        
+        // 提交表單處理
+        expenseForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMessageElement.classList.add('hidden');
+            errorMessageElement.textContent = '';
+
+            if (!isAuthReady) {
+                showModal('資料庫尚未連線，請稍候再試。');
+                return;
+            }
+
+            const totalAmount = parseFloat(totalAmountInput.value);
+            const currency = document.getElementById('currency').value;
+            const payer = document.getElementById('payer').value;
+            const description = document.getElementById('description').value.trim();
+            const splitType = splitTypeSelect.value;
+            const recordDateString = document.getElementById('recordDate').value;
+            const recordDate = recordDateString ? new Date(recordDateString).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
+            let amountH = 0;
+            let amountM = 0;
+            
+            if (isNaN(totalAmount) || totalAmount <= 0 || !description) {
+                errorMessageElement.textContent = '請輸入有效總金額和描述。';
+                errorMessageElement.classList.remove('hidden');
+                return;
+            }
+
+            if (splitType === 'equal') {
+                amountH = totalAmount / 2;
+                amountM = totalAmount / 2;
+            } else {
+                amountH = parseFloat(amountHInput.value) || 0;
+                amountM = parseFloat(amountMInput.value) || 0;
+                
+                // 檢查自訂金額是否與總金額匹配
+                if (Math.abs((amountH + amountM) - totalAmount) > 0.01) {
+                    errorMessageElement.textContent = `自訂金額總和 (${(amountH + amountM).toFixed(2)}) 與總金額 (${totalAmount.toFixed(2)}) 不符！請檢查。`;
+                    errorMessageElement.classList.remove('hidden');
+                    return;
+                }
+            }
+
+            // 1. 計算該交易的淨欠款變動 (使用原幣別)
+            let netDebtChange = 0; // 淨欠款變動 (M 欠 H 的金額變化)
+
+            if (payer === 'H') {
+                // H 付款, M 應付 amountM，因此 M 欠 H 增加了 amountM
+                netDebtChange = amountM; 
+            } else { // payer === 'M'
+                // M 付款, H 應付 amountH，因此 H 欠 M 增加了 amountH，即 M 欠 H 減少了 amountH (負數)
+                netDebtChange = -amountH;
+            }
+            
+            // 2. 匯率轉換
+            let netDebtChangeTWD = netDebtChange;
+            let conversionRate = 1;
+            
+            if (currency !== BASE_CURRENCY) {
+                if (RATES_LOADING || !EXCHANGE_RATES) {
+                    errorMessageElement.textContent = `匯率仍在載入中，或載入失敗。請稍候再試，或使用新台幣 (TWD) 進行跨幣別交易。`;
+                    errorMessageElement.classList.remove('hidden');
+                    return;
+                }
+                
+                // 獲取轉換率並計算 TWD 淨欠款變動
+                conversionRate = getConversionRateToTWD(currency);
+                
+                if (conversionRate === 0) {
+                     errorMessageElement.textContent = `無法取得 ${currency} 兌 ${BASE_CURRENCY} 的匯率，請稍後再試。`;
+                     errorMessageElement.classList.remove('hidden');
+                     return;
+                }
+
+                netDebtChangeTWD = netDebtChange * conversionRate;
+            }
+
+            try {
+                // 1. 寫入新紀錄
+                await addDoc(getExpensesCollectionRef(), {
+                    totalAmount: totalAmount,
+                    currency: currency,
+                    payer: payer, 
+                    description: description,
+                    splitType: splitType,
+                    amountH: amountH, 
+                    amountM: amountM, 
+                    netDebtChange: netDebtChange,        // 原幣別的淨欠款變動
+                    netDebtChangeTWD: netDebtChangeTWD,  // TWD 等值淨變動
+                    conversionRate: conversionRate,      // TWD 轉換率 (1 Foreign = X TWD)
+                    recordDate: recordDate, 
+                    recordTimestamp: serverTimestamp(), 
+                    recordedBy: userId,
+                });
+                
+                // 2. 更新總欠款 (讀取 -> 計算 -> 寫入)
+                const balanceDocRef = getBalanceDocRef();
+                
+                const balanceDocSnapshot = await getDoc(balanceDocRef);
+                let currentBalance = 0;
+
+                if (balanceDocSnapshot.exists()) {
+                    // 總欠款 balance 已經固定為 TWD 單位
+                    currentBalance = balanceDocSnapshot.data().balance || 0;
+                }
+                
+                // 總欠款直接加上 TWD 等值的淨變動
+                const newBalance = currentBalance + netDebtChangeTWD; 
+
+                // 總欠款的幣別應固定為 BASE_CURRENCY (TWD)
+                await setDoc(balanceDocRef, {
+                    balance: newBalance,
+                    currency: BASE_CURRENCY, // 固定為 TWD
+                    lastUpdated: serverTimestamp(),
+                }, { merge: true });
+
+                // 重設表單
+                expenseForm.reset();
+                document.getElementById('recordDate').valueAsDate = new Date();
+                splitTypeSelect.value = 'equal';
+                customSplitFields.classList.add('hidden');
+                totalAmountInput.focus();
+
+            } catch (error) {
+                handleFirebaseError(error, '儲存紀錄與更新欠款');
+            }
+        });
+        
+        // 應用程式啟動
         window.onload = initFirebase;
         
     </script>
