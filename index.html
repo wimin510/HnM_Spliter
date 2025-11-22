@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無賴帳本 HnM Spliter v1.1</title>
+    <title>無賴帳本</title> <!-- 修正：標題改為 無賴帳本 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap');
@@ -28,21 +28,21 @@
 </head>
 <body class="min-h-screen flex justify-center items-start text-slate-700 overflow-x-hidden">
 
-    <!-- 主應用程式 (v1.1) -->
+    <!-- 主應用程式 (v1.2) -->
     <div id="main-app" class="w-full max-w-[500px] space-y-6 my-4 p-4 sm:p-6 transition-opacity duration-500">
         
         <!-- 標題與登出 -->
         <div class="flex justify-between items-center px-2">
             <div>
                  <h1 class="text-2xl font-black text-slate-800 tracking-tight flex items-center">
-                    <span id="display-room-id" class="mr-2">demo 帳本</span>
+                    <span id="display-room-id" class="mr-2">無賴帳本</span> <!-- 修正：顯示文字改為 無賴帳本 -->
                 </h1>
                 <p class="text-[10px] text-slate-400 font-medium flex items-center gap-1">
                     <span id="status-dot" class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
                     <span id="connection-status">連線中...</span>
                 </p>
             </div>
-            <!-- v1.1 不支援登出，保留顯示 -->
+            <!-- v1.2 不支援登出，保留顯示 -->
         </div>
 
         <!-- 總欠款卡片 -->
@@ -59,7 +59,7 @@
                     </div>
                     <div class="text-right bg-slate-800/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 text-xs text-slate-300">
                          <div id="rates-display" class="space-y-0.5 font-mono opacity-80">
-                            <!-- 修正：將今日匯率文字加入，並預設顯示載入中 -->
+                            <!-- 修正：今日匯率顯示 -->
                             <div class="font-bold text-slate-400 mb-1">今日匯率</div>
                             <div id="rate-usd">載入中...</div>
                             <div id="rate-jpy">載入中...</div>
@@ -220,7 +220,7 @@
 
         // 狀態
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const currentRoomId = 'demo'; 
+        const currentRoomId = 'wulai'; // 保持 room ID 為 wulai
         
         let currentUser = null;
         let exchangeRates = { TWD: 1, USD: 32, JPY: 0.21 }; // Fallback rates for calculation (USD/JPY to TWD)
